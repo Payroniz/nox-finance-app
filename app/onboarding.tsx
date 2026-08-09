@@ -17,7 +17,6 @@ export default function OnboardingScreen() {
       setStep(1);
       return;
     }
-    // Save name and mark onboarding complete
     await setSetting('userName', name.trim() || 'Kullanıcı');
     await setSetting('onboardingCompleted', 'true');
     router.replace('/(tabs)');

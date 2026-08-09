@@ -15,35 +15,35 @@ import {
   formatCurrency, formatDateWithTime, getStatusColor,
   getStatusLabel, getStatusIcon, getRecurrenceLabel, getDueDateLabel,
 } from '../../src/utils/helpers';
-import { Payment, Currency, RecurrenceType } from '../../src/constants/types';
+import { Payment, Currency, RecurrenceType, IconType } from '../../src/constants/types';
 import { CurrencyInput } from '../../src/components/CurrencyInput';
 
 const QUICK_ICONS = [
-  // Para & Finans
+  //Para & Finans
   'cash', 'credit-card', 'bank', 'wallet', 'currency-usd', 'piggy-bank',
   'receipt', 'invoice-text', 'finance', 'trending-up', 'trending-down', 'chart-line',
-  // Ev & Yaşam
+  //Ev & Yaşam
   'home', 'home-city', 'sofa', 'bed', 'shower', 'flash',
   'water', 'fire', 'hvac', 'washing-machine', 'fridge', 'television',
-  // Ulaşım
+  //Ulaşım
   'car', 'car-wash', 'gas-station', 'airplane', 'train', 'bus',
   'motorbike', 'bicycle', 'taxi', 'ferry', 'parking', 'road',
-  // Teknoloji & İletişim
+  //Teknoloji & İletişim
   'phone', 'wifi', 'cellphone', 'laptop', 'tablet', 'monitor',
   'printer', 'headphones', 'camera', 'router-wireless', 'cloud', 'server',
-  // Sağlık & Spor
+  //Sağlık & Spor
   'medical-bag', 'hospital-box', 'heart-pulse', 'pill', 'tooth', 'eye',
   'dumbbell', 'yoga', 'run', 'swim', 'soccer', 'basketball',
-  // Yiyecek & İçecek
+  //Yiyecek & İçecek
   'food', 'coffee', 'food-fork-drink', 'pizza', 'hamburger', 'cake',
   'fruit-watermelon', 'cup', 'bottle-wine', 'grocery', 'silverware', 'chef-hat',
-  // Eğitim & Kültür
+  //Eğitim & Kültür
   'school', 'book', 'bookshelf', 'pencil', 'graduation-cap', 'library',
   'music', 'music-note', 'theater', 'palette', 'film', 'gamepad',
-  // Alışveriş & Hizmet
+  //Alışveriş & Hizmet
   'cart', 'store', 'tag', 'gift', 'hanger', 'shoe-heel',
   'scissors', 'hammer', 'tools', 'broom', 'face-woman', 'baby-carriage',
-  // Diğer
+  //Diğer
   'star', 'heart', 'flower', 'leaf', 'paw', 'earth',
   'shield', 'lock', 'key', 'bell', 'alarm', 'calendar',
 ];
@@ -72,7 +72,6 @@ export default function PaymentDetailScreen() {
   const [isEditing, setIsEditing] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
 
-  // Edit state
   const [editName, setEditName] = useState('');
   const [editAmount, setEditAmount] = useState('');
   const [editCurrency, setEditCurrency] = useState<Currency>('TRY');
@@ -83,7 +82,7 @@ export default function PaymentDetailScreen() {
   const [editNotes, setEditNotes] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
-  const [editIconType, setEditIconType] = useState('icon');
+  const [editIconType, setEditIconType] = useState<IconType>('icon');
   const [editIconValue, setEditIconValue] = useState('credit-card');
   const [saving, setSaving] = useState(false);
   const [showEditIconPicker, setShowEditIconPicker] = useState(false);
@@ -151,7 +150,7 @@ export default function PaymentDetailScreen() {
 
   const handlePickEditImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: (ImagePicker.MediaType as any)?.images ?? (ImagePicker.MediaTypeOptions as any).Images,
+      mediaTypes: 'images',
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.7,
@@ -183,7 +182,9 @@ export default function PaymentDetailScreen() {
 
   const handleMarkPaid = async () => {
     if (!payment) return;
+    if (payment.notification_id) await cancelNotification(payment.notification_id);
     await updatePaymentStatus(payment.id, 'paid');
+    await updatePayment(payment.id, { notification_id: '' });
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     await loadPayment();
   };
@@ -238,7 +239,6 @@ export default function PaymentDetailScreen() {
     return <MaterialCommunityIcons name={payment.icon_value as any} size={36} color={Colors.primary} />;
   };
 
-  // ---- EDIT VIEW ----
   if (isEditing) {
     return (
       <View style={styles.container}>
@@ -406,7 +406,6 @@ export default function PaymentDetailScreen() {
     );
   }
 
-  // ---- DETAIL VIEW ----
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -517,7 +516,6 @@ const styles = StyleSheet.create({
   secondaryActionText: { fontFamily: 'Poppins_600SemiBold', fontSize: FontSize.md, color: Colors.primary },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   emptyText: { fontFamily: 'Poppins_500Medium', fontSize: FontSize.md, color: Colors.textMuted },
-  // Edit styles
   editContent: { padding: Spacing.lg },
   editLabel: { fontFamily: 'Poppins_500Medium', fontSize: FontSize.sm, color: Colors.textSecondary, marginBottom: Spacing.sm },
   editInput: { backgroundColor: Colors.surface, borderRadius: BorderRadius.md, padding: Spacing.md, fontFamily: 'Poppins_400Regular', fontSize: FontSize.md, color: Colors.textPrimary, borderWidth: 1, borderColor: Colors.surfaceBorder, marginBottom: Spacing.lg },
@@ -573,7 +571,6 @@ const styles = StyleSheet.create({
     borderColor: Colors.background,
   },
   editDateText: { fontFamily: 'Poppins_500Medium', fontSize: FontSize.sm, color: Colors.textPrimary },
-  // Icon picker modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
   iconPickerModal: { backgroundColor: Colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: Spacing.xl, paddingBottom: 36, maxHeight: '75%' },
   iconPickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.lg },

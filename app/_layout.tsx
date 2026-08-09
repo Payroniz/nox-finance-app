@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, AppState, AppStateStatus,
 } from 'react-native';
-import { Stack, router } from 'expo-router';
+import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Font from 'expo-font';
 import {
@@ -16,47 +16,35 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { initializeDatabase, getSetting } from '../src/db/database';
-import { requestNotificationPermissions } from '../src/utils/notifications';
+import { removeLegacySensitiveNotifications } from '../src/utils/notifications';
+import { migrateLegacyPin, verifyPin } from '../src/utils/security';
+import { cleanupTemporaryBackups } from '../src/utils/backups';
 import { Colors, Spacing, BorderRadius, FontSize } from '../src/constants/theme';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const [appIsReady, setAppIsReady] = useState(false);
+  const [initializationError, setInitializationError] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
   const [lockMethod, setLockMethod] = useState<'pin' | 'biometric' | null>(null);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
-  const [storedPin, setStoredPin] = useState('');
-  const [autoLockMinutes, setAutoLockMinutes] = useState(1);
   const backgroundTimeRef = useRef<number | null>(null);
   const appStateRef = useRef<AppStateStatus>('active');
+  const failedPinAttemptsRef = useRef(0);
+  const pinLockoutUntilRef = useRef(0);
 
   useEffect(() => {
     async function prepare() {
       try {
-        await Font.loadAsync({
-          Poppins_400Regular,
-          Poppins_500Medium,
-          Poppins_600SemiBold,
-          Poppins_700Bold,
-          Poppins_800ExtraBold,
-        });
-
         await initializeDatabase();
-        await requestNotificationPermissions();
+        await migrateLegacyPin();
 
-        // Load security settings
-        const [pinEnabled, biometricEnabled, pinCode, autoLock] = await Promise.all([
+        const [pinEnabled, biometricEnabled] = await Promise.all([
           getSetting('pinEnabled'),
           getSetting('biometricEnabled'),
-          getSetting('pinCode'),
-          getSetting('autoLockMinutes'),
         ]);
-
-        const minutes = parseInt(autoLock ?? '1');
-        setAutoLockMinutes(minutes);
-        setStoredPin(pinCode ?? '');
 
         const shouldLock = pinEnabled === 'true' || biometricEnabled === 'true';
 
@@ -69,54 +57,68 @@ export default function RootLayout() {
           }
         }
 
+        await Promise.allSettled([
+          cleanupTemporaryBackups(),
+          removeLegacySensitiveNotifications(),
+        ]);
+
         const onboardingDone = await getSetting('onboardingCompleted');
-        if (onboardingDone !== 'true') {
-          setAppIsReady(true);
-          return;
-        }
+        if (onboardingDone !== 'true') return;
       } catch (e) {
         console.warn('App init error:', e);
+        setInitializationError(true);
       } finally {
+        try {
+          await Font.loadAsync({
+            Poppins_400Regular,
+            Poppins_500Medium,
+            Poppins_600SemiBold,
+            Poppins_700Bold,
+            Poppins_800ExtraBold,
+          });
+        } catch (fontError) {
+          console.warn('Font load error:', fontError);
+        }
         setAppIsReady(true);
       }
     }
     prepare();
   }, []);
 
-  // Auto-lock on app background/foreground
   useEffect(() => {
     const handleAppStateChange = async (nextState: AppStateStatus) => {
       if (appStateRef.current === 'active' && nextState === 'background') {
-        // App going to background - record time
         backgroundTimeRef.current = Date.now();
       } else if (nextState === 'active' && appStateRef.current !== 'active') {
-        // App coming to foreground - check if we should lock
         const bgTime = backgroundTimeRef.current;
         if (bgTime !== null) {
           const elapsedMinutes = (Date.now() - bgTime) / 1000 / 60;
-          // Check current security settings
-          const [pinEnabled, biometricEnabled, pinCode, autoLock] = await Promise.all([
-            getSetting('pinEnabled'),
-            getSetting('biometricEnabled'),
-            getSetting('pinCode'),
-            getSetting('autoLockMinutes'),
-          ]);
-          const lockMinutes = parseInt(autoLock ?? '1');
-          setAutoLockMinutes(lockMinutes);
-          setStoredPin(pinCode ?? '');
+          try {
+            const [pinEnabled, biometricEnabled, autoLock] = await Promise.all([
+              getSetting('pinEnabled'),
+              getSetting('biometricEnabled'),
+              getSetting('autoLockMinutes'),
+            ]);
+            const lockMinutes = parseInt(autoLock ?? '1');
 
-          const securityEnabled = pinEnabled === 'true' || biometricEnabled === 'true';
-          const shouldLock = securityEnabled && (lockMinutes === 0 || elapsedMinutes >= lockMinutes);
+            const securityEnabled = pinEnabled === 'true' || biometricEnabled === 'true';
+            const shouldLock = securityEnabled && (lockMinutes === 0 || elapsedMinutes >= lockMinutes);
 
-          if (shouldLock) {
-            setIsLocked(true);
-            setPinInput('');
-            setPinError('');
-            if (biometricEnabled === 'true') {
-              setLockMethod('biometric');
-            } else {
-              setLockMethod('pin');
+            if (shouldLock) {
+              setIsLocked(true);
+              setPinInput('');
+              setPinError('');
+              if (biometricEnabled === 'true') {
+                setLockMethod('biometric');
+              } else {
+                setLockMethod('pin');
+              }
             }
+          } catch (error) {
+            console.warn('Security settings read error:', error);
+            setIsLocked(true);
+            setLockMethod('pin');
+            setPinError('Güvenlik ayarları okunamadı. Uygulamayı yeniden başlatın.');
           }
         }
       }
@@ -127,7 +129,6 @@ export default function RootLayout() {
     return () => subscription.remove();
   }, []);
 
-  // Auto-trigger biometric when lock screen appears
   useEffect(() => {
     if (isLocked && lockMethod === 'biometric') {
       handleBiometricAuth();
@@ -144,7 +145,6 @@ export default function RootLayout() {
       if (result.success) {
         unlock();
       } else {
-        // Fall back to PIN if available
         const pinEnabled = await getSetting('pinEnabled');
         if (pinEnabled === 'true') {
           setLockMethod('pin');
@@ -156,20 +156,44 @@ export default function RootLayout() {
     }
   };
 
-  const handlePinSubmit = async () => {
-    const currentPin = await getSetting('pinCode');
-    if (pinInput === currentPin) {
+  const handlePinAttempt = async (candidate: string) => {
+    if (candidate.length !== 6) {
+      setPinError('PIN 6 haneli olmalıdır.');
+      return;
+    }
+
+    const remainingSeconds = Math.ceil((pinLockoutUntilRef.current - Date.now()) / 1000);
+    if (remainingSeconds > 0) {
+      setPinError(`Çok fazla hatalı deneme. ${remainingSeconds} saniye bekleyin.`);
+      setPinInput('');
+      return;
+    }
+
+    if (await verifyPin(candidate)) {
       unlock();
     } else {
-      setPinError('Yanlış PIN. Tekrar deneyin.');
+      failedPinAttemptsRef.current += 1;
+      if (failedPinAttemptsRef.current >= 5) {
+        failedPinAttemptsRef.current = 0;
+        pinLockoutUntilRef.current = Date.now() + 30_000;
+        setPinError('Çok fazla hatalı deneme. 30 saniye bekleyin.');
+      } else {
+        setPinError('Yanlış PIN. Tekrar deneyin.');
+      }
       setPinInput('');
     }
+  };
+
+  const handlePinSubmit = async () => {
+    await handlePinAttempt(pinInput);
   };
 
   const unlock = () => {
     setIsLocked(false);
     setPinInput('');
     setPinError('');
+    failedPinAttemptsRef.current = 0;
+    pinLockoutUntilRef.current = 0;
     backgroundTimeRef.current = null;
   };
 
@@ -180,6 +204,22 @@ export default function RootLayout() {
   }, [appIsReady]);
 
   if (!appIsReady) return null;
+
+  if (initializationError) {
+    return (
+      <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayoutRootView}>
+        <View style={lockStyles.overlay}>
+          <View style={lockStyles.container}>
+            <MaterialCommunityIcons name="shield-alert" size={56} color={Colors.danger} />
+            <Text style={lockStyles.title}>Güvenli Başlatma Başarısız</Text>
+            <Text style={[lockStyles.subtitle, { textAlign: 'center' }]}>
+              Uygulama verileri güvenli biçimde açılamadı. Uygulamayı tamamen kapatıp yeniden deneyin.
+            </Text>
+          </View>
+        </View>
+      </GestureHandlerRootView>
+    );
+  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayoutRootView}>
@@ -218,11 +258,7 @@ export default function RootLayout() {
                     setPinInput(digits);
                     setPinError('');
                     if (digits.length === 6) {
-                      // Auto submit on 6 digits
-                      getSetting('pinCode').then(code => {
-                        if (digits === code) unlock();
-                        else { setPinError('Yanlış PIN. Tekrar deneyin.'); setPinInput(''); }
-                      });
+                      void handlePinAttempt(digits);
                     }
                   }}
                   keyboardType="number-pad"

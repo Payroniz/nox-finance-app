@@ -138,7 +138,11 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   actionsContainer: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     flexDirection: 'row',
     borderRadius: BorderRadius.lg,
     overflow: 'hidden',

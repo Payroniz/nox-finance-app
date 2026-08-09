@@ -13,8 +13,8 @@ export interface Payment {
   category: string;
   icon_type: IconType;
   icon_value: string;
-  due_date: string; // ISO string
-  due_time: string; // HH:mm
+  due_date: string; 
+  due_time: string; 
   recurrence: RecurrenceType;
   status: PaymentStatus;
   notes: string;
@@ -33,7 +33,7 @@ export interface Debt {
   due_date: string;
   interest_rate: number;
   notes: string;
-  notification_ids: string; // JSON array string
+  notification_ids: string; 
   created_at: string;
 }
 
@@ -69,8 +69,7 @@ export interface AppSettings {
   pinEnabled: boolean;
   biometricEnabled: boolean;
   onboardingCompleted: boolean;
-  autoLockMinutes: number; // 0 = anında, -1 = hiç kilitleme
-  pinCode: string;
+  autoLockMinutes: number;
 }
 
 export interface MonthlyStats {

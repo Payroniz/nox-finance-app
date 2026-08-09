@@ -3,30 +3,23 @@ import { View, Text, TextInput, StyleSheet, TouchableOpacity } from 'react-nativ
 import { Colors, BorderRadius, FontSize, Spacing } from '../constants/theme';
 
 interface CurrencyInputProps {
-  value: string; // e.g. "1500.50"
+  value: string;
   onChange: (val: string) => void;
   symbol?: string;
   style?: object;
 }
 
-/**
- * Lira ve kuruş ayrı giriş kutusu.
- * value: "1500.50" formatında string
- */
 export const CurrencyInput: React.FC<CurrencyInputProps> = ({ value, onChange, symbol = '₺', style }) => {
   const kurusRef = useRef<TextInput>(null);
   const liraRef = useRef<TextInput>(null);
 
-  // value örn: "1500.50" → lira="1500" kurus="50"
   const parts = value.split('.');
   const liraStr = parts[0] || '';
   const kurusStr = parts[1] !== undefined ? parts[1] : '';
 
   const handleLiraChange = (text: string) => {
-    // Sadece rakam kabul et
     const clean = text.replace(/\D/g, '');
     onChange(clean + (kurusStr !== '' ? '.' + kurusStr : ''));
-    // Kuruşa atla
     if (text.endsWith('.') || text.endsWith(',')) {
       kurusRef.current?.focus();
     }
@@ -37,7 +30,6 @@ export const CurrencyInput: React.FC<CurrencyInputProps> = ({ value, onChange, s
     onChange(liraStr + '.' + clean);
   };
 
-  // Görüntüleme için lira kısmını binlik ayır
   const formattedLira = liraStr
     ? parseInt(liraStr, 10).toLocaleString('tr-TR')
     : '';
@@ -50,7 +42,6 @@ export const CurrencyInput: React.FC<CurrencyInputProps> = ({ value, onChange, s
         style={styles.liraInput}
         value={formattedLira}
         onChangeText={(t) => {
-          // binlik ayraçları temizleyip işle
           const raw = t.replace(/\./g, '').replace(/,/g, '').replace(/\D/g, '');
           onChange(raw + (kurusStr !== '' ? '.' + kurusStr : ''));
           if (t.endsWith('.') || t.endsWith(',')) kurusRef.current?.focus();

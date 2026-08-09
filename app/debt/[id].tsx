@@ -12,7 +12,7 @@ import { Colors, Spacing, BorderRadius, FontSize, Shadow } from '../../src/const
 import {
   getDebtById, deleteDebt, addDebtPayment, getDebtPayments, updateDebt,
 } from '../../src/db/database';
-import { cancelMultipleNotifications } from '../../src/utils/notifications';
+import { cancelMultipleNotifications, scheduleDebtNotification } from '../../src/utils/notifications';
 import {
   formatCurrency, formatDate, getDueDateLabel, determineDebtStatus, getDebtStatusColor,
 } from '../../src/utils/helpers';
@@ -63,7 +63,6 @@ export default function DebtDetailScreen() {
   const [payNote, setPayNote] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Edit state
   const [isEditing, setIsEditing] = useState(false);
   const [editPersonName, setEditPersonName] = useState('');
   const [editAmount, setEditAmount] = useState('');
@@ -114,7 +113,7 @@ export default function DebtDetailScreen() {
 
   const handlePickEditImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: (ImagePicker.MediaType as any)?.images ?? (ImagePicker.MediaTypeOptions as any).Images,
+      mediaTypes: 'images',
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.7,
@@ -170,15 +169,31 @@ export default function DebtDetailScreen() {
 
     setSaving(true);
     try {
+      const oldNotificationIds = (() => {
+        try { return JSON.parse(debt.notification_ids || '[]') as string[]; }
+        catch { return []; }
+      })();
+      await cancelMultipleNotifications(oldNotificationIds);
+
+      const dueDate = editHasDueDate ? editDueDate.toISOString() : '';
+      const notificationIds = await scheduleDebtNotification({
+        person_name: editPersonName.trim(),
+        total_amount: parsedAmount,
+        currency: editCurrency,
+        due_date: dueDate,
+        debt_direction: editDirection,
+      }, editReminderDays);
+
       await updateDebt(debt.id, {
         person_name: editPersonName.trim(),
         person_photo: editPersonPhoto,
         total_amount: parsedAmount,
         currency: editCurrency,
         debt_direction: editDirection,
-        due_date: editHasDueDate ? editDueDate.toISOString() : '',
+        due_date: dueDate,
         interest_rate: parseFloat(editInterestRate) || 0,
         notes: editNotes.trim(),
+        notification_ids: JSON.stringify(notificationIds),
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setIsEditing(false);
@@ -196,7 +211,8 @@ export default function DebtDetailScreen() {
         { text: 'Vazgeç', style: 'cancel' },
         { text: 'Sil', style: 'destructive', onPress: async () => {
           if (!debt) return;
-          const notifIds = JSON.parse(debt.notification_ids || '[]');
+          let notifIds: string[] = [];
+          try { notifIds = JSON.parse(debt.notification_ids || '[]'); } catch { /* Bozuk eski kayıt */ }
           await cancelMultipleNotifications(notifIds);
           await deleteDebt(debt.id);
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -218,6 +234,12 @@ export default function DebtDetailScreen() {
     setSaving(true);
     try {
       await addDebtPayment({ debt_id: debt.id, amount: parsed, paid_at: new Date().toISOString(), notes: payNote.trim() });
+      if (parsed >= remaining) {
+        let notifIds: string[] = [];
+        try { notifIds = JSON.parse(debt.notification_ids || '[]'); } catch { /* Bozuk eski kayıt */ }
+        await cancelMultipleNotifications(notifIds);
+        await updateDebt(debt.id, { notification_ids: '[]' });
+      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setShowPayModal(false);
       setPayAmount(''); setPayNote('');
@@ -238,6 +260,10 @@ export default function DebtDetailScreen() {
         { text: 'Vazgeç', style: 'cancel' },
         { text: 'Evet', onPress: async () => {
           await addDebtPayment({ debt_id: debt.id, amount: remaining, paid_at: new Date().toISOString(), notes: 'Tamamen ödendi' });
+          let notifIds: string[] = [];
+          try { notifIds = JSON.parse(debt.notification_ids || '[]'); } catch { /* Bozuk eski kayıt */ }
+          await cancelMultipleNotifications(notifIds);
+          await updateDebt(debt.id, { notification_ids: '[]' });
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           await loadData();
         }},
@@ -273,7 +299,6 @@ export default function DebtDetailScreen() {
   const directionColor = isOwe ? Colors.danger : Colors.success;
   const currencySymbol = { TRY: '₺', USD: '$', EUR: '€', GBP: '£' }[debt.currency] ?? '₺';
 
-  // ---- EDIT VIEW ----
   if (isEditing) {
     return (
       <View style={styles.container}>
@@ -305,8 +330,8 @@ export default function DebtDetailScreen() {
             <TouchableOpacity style={[styles.editChip, editDirection === 'owe' && { backgroundColor: Colors.danger, borderColor: Colors.danger }]} onPress={() => setEditDirection('owe')}>
               <Text style={[styles.editChipText, editDirection === 'owe' && styles.editChipTextActive]}>↑ Borcum Var</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.editChip, editDirection === 'lend' && { backgroundColor: Colors.success, borderColor: Colors.success }]} onPress={() => setEditDirection('lend')}>
-              <Text style={[styles.editChipText, editDirection === 'lend' && styles.editChipTextActive]}>↓ Alacağım Var</Text>
+            <TouchableOpacity style={[styles.editChip, editDirection === 'owed' && { backgroundColor: Colors.success, borderColor: Colors.success }]} onPress={() => setEditDirection('owed')}>
+              <Text style={[styles.editChipText, editDirection === 'owed' && styles.editChipTextActive]}>↓ Alacağım Var</Text>
             </TouchableOpacity>
           </View>
 
@@ -484,7 +509,6 @@ export default function DebtDetailScreen() {
     );
   }
 
-  // ---- DETAIL VIEW ----
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -727,7 +751,6 @@ const styles = StyleSheet.create({
   payModalBtnText: { fontFamily: 'Poppins_600SemiBold', fontSize: FontSize.md, color: '#fff' },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   emptyText: { fontFamily: 'Poppins_500Medium', fontSize: FontSize.md, color: Colors.textMuted },
-  // Edit
   editContent: { padding: Spacing.lg },
   editLabel: { fontFamily: 'Poppins_500Medium', fontSize: FontSize.sm, color: Colors.textSecondary, marginBottom: Spacing.sm },
   editInput: { backgroundColor: Colors.surface, borderRadius: BorderRadius.md, padding: Spacing.md, fontFamily: 'Poppins_400Regular', fontSize: FontSize.md, color: Colors.textPrimary, borderWidth: 1, borderColor: Colors.surfaceBorder, marginBottom: Spacing.lg },
@@ -811,8 +834,6 @@ const styles = StyleSheet.create({
     borderColor: Colors.background,
   },
   editDateText: { fontFamily: 'Poppins_500Medium', fontSize: FontSize.sm, color: Colors.textPrimary },
-  // Icon picker modal
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
   iconPickerModal: { backgroundColor: Colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: Spacing.xl, paddingBottom: 36, maxHeight: '75%' },
   iconPickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.lg },
   iconPickerTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: FontSize.lg, color: Colors.textPrimary },

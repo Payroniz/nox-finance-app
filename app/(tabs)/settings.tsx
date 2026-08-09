@@ -6,14 +6,25 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as LocalAuthentication from 'expo-local-authentication';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { Colors, Spacing, BorderRadius, FontSize } from '../../src/constants/theme';
 import { Card } from '../../src/components/Card';
-import { getAllSettings, setSetting, exportData } from '../../src/db/database';
-import { scheduleDailySummary, cancelDailySummary } from '../../src/utils/notifications';
+import { deleteAllData, getAllSettings, setSetting, exportData } from '../../src/db/database';
+import {
+  cancelAllNotifications,
+  canScheduleNotifications,
+  requestNotificationPermissions,
+  scheduleDailySummary,
+} from '../../src/utils/notifications';
+import {
+  deleteSecurePin,
+  isSecureStorageAvailable,
+  setSecurePin,
+} from '../../src/utils/security';
+import { cleanupTemporaryBackups } from '../../src/utils/backups';
 import { AppSettings, Currency } from '../../src/constants/types';
 
 
@@ -45,9 +56,9 @@ export default function SettingsScreen() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [showNameModal, setShowNameModal] = useState(false);
   const [nameInput, setNameInput] = useState('');
-  const [showReminderPicker, setShowReminderPicker] = useState(false);
   const [showSummaryTimePicker, setShowSummaryTimePicker] = useState(false);
-  const [showPinModal, setShowPinModal] = useState(false);  const [pinInput, setPinInput] = useState('');
+  const [showPinModal, setShowPinModal] = useState(false);
+  const [pinInput, setPinInput] = useState('');
   const [pinConfirm, setPinConfirm] = useState('');
   const [pinStep, setPinStep] = useState<'enter' | 'confirm'>('enter');
   const [pinError, setPinError] = useState('');
@@ -56,6 +67,10 @@ export default function SettingsScreen() {
 
   const loadSettings = async () => {
     const s = await getAllSettings();
+    if (s.notificationsEnabled && !(await canScheduleNotifications())) {
+      await setSetting('notificationsEnabled', 'false');
+      s.notificationsEnabled = false;
+    }
     setSettings(s);
   };
 
@@ -64,10 +79,9 @@ export default function SettingsScreen() {
     setSettings(prev => prev ? { ...prev, [key]: value } : null);
   };
 
-  // --- Profil fotoğrafı ---
   const handlePickPhoto = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaType ? ImagePicker.MediaType.images : (ImagePicker.MediaTypeOptions as any).Images,
+      mediaTypes: 'images',
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.8,
@@ -77,7 +91,6 @@ export default function SettingsScreen() {
     }
   };
 
-  // --- İsim değiştir ---
   const handleOpenNameModal = () => {
     setNameInput(settings?.userName ?? '');
     setShowNameModal(true);
@@ -89,7 +102,6 @@ export default function SettingsScreen() {
     setShowNameModal(false);
   };
 
-  // --- Hatırlatma günleri ---
   const REMINDER_OPTIONS = [1, 2, 3, 5, 7, 14];
   const handleReminderDays = () => {
     Alert.alert(
@@ -105,7 +117,6 @@ export default function SettingsScreen() {
     );
   };
 
-  // --- Günlük özet saati ---
   const handleSummaryTimeConfirm = async (date: Date) => {
     const h = String(date.getHours()).padStart(2, '0');
     const m = String(date.getMinutes()).padStart(2, '0');
@@ -117,7 +128,6 @@ export default function SettingsScreen() {
     setShowSummaryTimePicker(false);
   };
 
-  // --- Otomatik Kilitleme ---
   const AUTO_LOCK_OPTIONS = [
     { label: 'Anında', value: 0 },
     { label: '1 Dakika sonra', value: 1 },
@@ -147,16 +157,19 @@ export default function SettingsScreen() {
     return opt ? opt.label : `${minutes} dk`;
   };
 
-  // --- PIN ---
   const handlePinToggle = async (value: boolean) => {
     if (value) {
+      if (!(await isSecureStorageAvailable())) {
+        Alert.alert('PIN Kullanılamıyor', 'Bu cihazda güvenli PIN saklama alanı kullanılamıyor.');
+        return;
+      }
       setPinInput('');
       setPinConfirm('');
       setPinStep('enter');
       setPinError('');
       setShowPinModal(true);
     } else {
-      await setSetting('pinCode', '');
+      await deleteSecurePin();
       await updateSetting('pinEnabled', false);
     }
   };
@@ -175,11 +188,15 @@ export default function SettingsScreen() {
       setPinError('PIN kodları eşleşmiyor.');
       return;
     }
-    await setSetting('pinCode', pinInput);
-    await updateSetting('pinEnabled', true);
-    setShowPinModal(false);
-    setPinInput('');
-    setPinConfirm('');
+    try {
+      await setSecurePin(pinInput);
+      await updateSetting('pinEnabled', true);
+      setShowPinModal(false);
+      setPinInput('');
+      setPinConfirm('');
+    } catch {
+      setPinError('PIN güvenli alana kaydedilemedi.');
+    }
   };
 
   const handlePinModalClose = () => {
@@ -190,7 +207,6 @@ export default function SettingsScreen() {
     setPinError('');
   };
 
-  // --- Biyometrik ---
   const handleBiometricToggle = async (value: boolean) => {
     if (value) {
       const compatible = await LocalAuthentication.hasHardwareAsync();
@@ -213,15 +229,65 @@ export default function SettingsScreen() {
     }
   };
 
-  // --- Export ---
-  const handleExport = async () => {
+  const handleNotificationsToggle = async (value: boolean) => {
+    if (!value) {
+      await cancelAllNotifications();
+      await updateSetting('notificationsEnabled', false);
+      return;
+    }
+
+    const granted = await requestNotificationPermissions();
+    if (!granted) {
+      await updateSetting('notificationsEnabled', false);
+      Alert.alert('İzin Gerekli', 'Bildirim izni verilmediği için hatırlatıcılar açılamadı.');
+      return;
+    }
+
+    await updateSetting('notificationsEnabled', true);
+    await scheduleDailySummary(settings?.dailySummaryTime ?? '08:00');
+  };
+
+  const performExport = async () => {
+    let path: string | null = null;
     try {
+      if (!FileSystem.cacheDirectory) throw new Error('CACHE_UNAVAILABLE');
+      if (!(await Sharing.isAvailableAsync())) throw new Error('SHARING_UNAVAILABLE');
+
       const data = await exportData();
-      const path = `${FileSystem.documentDirectory}nox-backup-${Date.now()}.json`;
+      path = `${FileSystem.cacheDirectory}nox-backup-${Date.now()}.json`;
       await FileSystem.writeAsStringAsync(path, data, { encoding: FileSystem.EncodingType.UTF8 });
       await Sharing.shareAsync(path, { mimeType: 'application/json' });
     } catch (e) {
       Alert.alert('Hata', 'Dışa aktarma sırasında hata oluştu.');
+    } finally {
+      if (path) {
+        await FileSystem.deleteAsync(path, { idempotent: true }).catch(() => undefined);
+      }
+    }
+  };
+
+  const handleExport = () => {
+    Alert.alert(
+      'Hassas Veri Uyarısı',
+      'Yedek; ödeme, borç ve profil bilgilerinizi içerir. PIN ve güvenlik ayarları yedeğe eklenmez. Dosyayı yalnızca güvendiğiniz bir konuma gönderin.',
+      [
+        { text: 'İptal', style: 'cancel' },
+        { text: 'Yedekle', onPress: () => void performExport() },
+      ]
+    );
+  };
+
+  const handleDeleteAllData = async () => {
+    try {
+      await cancelAllNotifications();
+      await deleteAllData();
+      await deleteSecurePin();
+      await cleanupTemporaryBackups();
+      await loadSettings();
+      Alert.alert('Tamamlandı', 'Tüm uygulama verileri, PIN ve geçici yedekler silindi.');
+    } catch (error) {
+      console.error('Delete all data error:', error);
+      Alert.alert('Hata', 'Verilerin tamamı silinemedi. Lütfen tekrar deneyin.');
     }
   };
 
@@ -232,15 +298,12 @@ export default function SettingsScreen() {
 
   if (!settings) return null;
 
-  // Saat picker için Date objesi
   const summaryDate = (() => {
     const [h, m] = settings.dailySummaryTime.split(':').map(Number);
     const d = new Date();
     d.setHours(h, m, 0, 0);
     return d;
   })();
-
-  // SettingRow defined as top-level component (keyboard/render fix)
 
   return (
     <View style={styles.container}>
@@ -302,7 +365,7 @@ export default function SettingsScreen() {
           <SettingRow icon="bell" label="Bildirimleri Aç">
             <Switch
               value={settings.notificationsEnabled}
-              onValueChange={(v) => updateSetting('notificationsEnabled', v)}
+              onValueChange={handleNotificationsToggle}
               trackColor={{ false: Colors.surfaceBorder, true: Colors.primary }}
               thumbColor="#fff"
             />
@@ -370,7 +433,7 @@ export default function SettingsScreen() {
               Alert.alert('Verileri Sil', 'Tüm verileriniz kalıcı olarak silinecek. Emin misiniz?',
                 [
                   { text: 'İptal', style: 'cancel' },
-                  { text: 'Sil', style: 'destructive', onPress: () => {} },
+                  { text: 'Sil', style: 'destructive', onPress: () => void handleDeleteAllData() },
                 ]
               );
             }}
@@ -527,7 +590,6 @@ const styles = StyleSheet.create({
   settingValue: { fontFamily: 'Poppins_500Medium', fontSize: 13, color: Colors.textSecondary },
   settingValueRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   divider: { height: 1, backgroundColor: Colors.surfaceBorder, marginHorizontal: Spacing.md },
-  // Name modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: Spacing.xl },
   nameModal: {
     backgroundColor: Colors.surface,

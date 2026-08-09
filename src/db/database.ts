@@ -74,10 +74,8 @@ export const initializeDatabase = async (): Promise<void> => {
     );
   `);
 
-  // Varsayılan kategorileri ekle
   await seedDefaultCategories(database);
 
-  // Varsayılan ayarları ekle
   await seedDefaultSettings(database);
 };
 
@@ -114,14 +112,13 @@ const seedDefaultSettings = async (database: SQLite.SQLiteDatabase): Promise<voi
     { key: 'profilePhoto', value: '' },
     { key: 'defaultCurrency', value: 'TRY' },
     { key: 'theme', value: 'dark' },
-    { key: 'notificationsEnabled', value: 'true' },
+    { key: 'notificationsEnabled', value: 'false' },
     { key: 'defaultReminderDays', value: '3' },
     { key: 'dailySummaryTime', value: '08:00' },
     { key: 'pinEnabled', value: 'false' },
     { key: 'biometricEnabled', value: 'false' },
     { key: 'onboardingCompleted', value: 'false' },
     { key: 'autoLockMinutes', value: '1' },
-    { key: 'pinCode', value: '' },
   ];
 
   for (const setting of defaults) {
@@ -132,10 +129,7 @@ const seedDefaultSettings = async (database: SQLite.SQLiteDatabase): Promise<voi
   }
 };
 
-// ============================================================
-// PAYMENTS
-// ============================================================
-
+//ÖDEMELER
 export const getPayments = async (): Promise<Payment[]> => {
   const database = await getDatabase();
   return await database.getAllAsync<Payment>('SELECT * FROM payments ORDER BY due_date ASC');
@@ -183,6 +177,13 @@ export const addPayment = async (payment: Omit<Payment, 'id' | 'created_at'>): P
 
 export const updatePaymentStatus = async (id: number, status: string): Promise<void> => {
   const database = await getDatabase();
+  if (status === 'paid') {
+    await database.runAsync(
+      "UPDATE payments SET status = ?, notification_id = '' WHERE id = ?",
+      [status, id]
+    );
+    return;
+  }
   await database.runAsync('UPDATE payments SET status = ? WHERE id = ?', [status, id]);
 };
 
@@ -215,10 +216,7 @@ export const getMarkedDates = async (year: number, month: number): Promise<Recor
   return marked;
 };
 
-// ============================================================
-// DEBTS
-// ============================================================
-
+//DEBTS
 export const getDebts = async (direction?: 'owe' | 'owed'): Promise<Debt[]> => {
   const database = await getDatabase();
   if (direction) {
@@ -282,10 +280,7 @@ export const getDebtPayments = async (debtId: number): Promise<DebtPayment[]> =>
   );
 };
 
-// ============================================================
-// CATEGORIES
-// ============================================================
-
+//CATEGORIES
 export const getCategories = async (): Promise<Category[]> => {
   const database = await getDatabase();
   return await database.getAllAsync<Category>('SELECT * FROM categories ORDER BY is_custom ASC, name ASC');
@@ -304,10 +299,7 @@ export const deleteCategory = async (id: number): Promise<void> => {
   await database.runAsync('DELETE FROM categories WHERE id = ? AND is_custom = 1', [id]);
 };
 
-// ============================================================
-// SETTINGS
-// ============================================================
-
+//SETTINGS
 export const getSetting = async (key: string): Promise<string | null> => {
   const database = await getDatabase();
   const result = await database.getFirstAsync<Settings>('SELECT * FROM settings WHERE key = ?', [key]);
@@ -320,6 +312,17 @@ export const setSetting = async (key: string, value: string): Promise<void> => {
     'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
     [key, value]
   );
+};
+
+export const purgeLegacyPin = async (): Promise<void> => {
+  const database = await getDatabase();
+  const existing = await database.getFirstAsync<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM settings WHERE key = 'pinCode'"
+  );
+  if (!existing?.count) return;
+
+  await database.runAsync("DELETE FROM settings WHERE key = 'pinCode'");
+  await database.execAsync('PRAGMA wal_checkpoint(TRUNCATE); VACUUM;');
 };
 
 export const getAllSettings = async (): Promise<AppSettings> => {
@@ -341,14 +344,10 @@ export const getAllSettings = async (): Promise<AppSettings> => {
     biometricEnabled: map.biometricEnabled === 'true',
     onboardingCompleted: map.onboardingCompleted === 'true',
     autoLockMinutes: parseInt(map.autoLockMinutes ?? '1'),
-    pinCode: map.pinCode ?? '',
   };
 };
 
-// ============================================================
-// STATS
-// ============================================================
-
+//STATS
 export const getMonthlyStats = async (year: number, month: number) => {
   const database = await getDatabase();
   const monthStr = String(month).padStart(2, '0');
@@ -395,7 +394,30 @@ export const exportData = async () => {
   const debts = await database.getAllAsync<Debt>('SELECT * FROM debts');
   const debtPayments = await database.getAllAsync<DebtPayment>('SELECT * FROM debt_payments');
   const categories = await database.getAllAsync<Category>('SELECT * FROM categories');
-  const settings = await database.getAllAsync<Settings>('SELECT * FROM settings');
+  //Güvenlik ayarları ve eski sürümlerden kalmış PIN hiçbir zaman yedeğe girmez.
+  const settings = await database.getAllAsync<Settings>(
+    "SELECT * FROM settings WHERE key NOT IN ('pinCode', 'pinEnabled', 'biometricEnabled', 'profilePhoto', 'notificationPrivacyMigrated')"
+  );
 
   return JSON.stringify({ payments, debts, debtPayments, categories, settings }, null, 2);
+};
+
+export const deleteAllData = async (): Promise<void> => {
+  const database = await getDatabase();
+
+  await database.withExclusiveTransactionAsync(async transaction => {
+    await transaction.execAsync(`
+      DELETE FROM debt_payments;
+      DELETE FROM debts;
+      DELETE FROM payments;
+      DELETE FROM categories;
+      DELETE FROM settings;
+      DELETE FROM sqlite_sequence
+        WHERE name IN ('payments', 'debts', 'debt_payments', 'categories');
+    `);
+  });
+
+  await seedDefaultCategories(database);
+  await seedDefaultSettings(database);
+  await database.execAsync('PRAGMA wal_checkpoint(TRUNCATE); VACUUM;');
 };

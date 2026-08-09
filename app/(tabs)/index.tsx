@@ -15,6 +15,7 @@ import {
 } from '../../src/db/database';
 import { formatCurrency, getGreeting, getDaysUntilDue } from '../../src/utils/helpers';
 import { Payment, Debt } from '../../src/constants/types';
+import { cancelNotification } from '../../src/utils/notifications';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -102,21 +103,23 @@ export default function Dashboard() {
   };
 
   const handleMarkPaid = async (id: number) => {
+    const payment = (await getPayments()).find(item => item.id === id);
+    if (payment?.notification_id) await cancelNotification(payment.notification_id);
     await updatePaymentStatus(id, 'paid');
     await loadData();
   };
 
   const handleDeletePayment = async (id: number) => {
+    const payment = (await getPayments()).find(item => item.id === id);
+    if (payment?.notification_id) await cancelNotification(payment.notification_id);
     await deletePayment(id);
     await loadData();
   };
 
-  // Month-over-month change
   const monthChange = stats && prevStats && prevStats.totalExpense > 0
     ? ((stats.totalExpense - prevStats.totalExpense) / prevStats.totalExpense) * 100
     : null;
 
-  // Completion rate
   const totalPayments = (stats?.paidCount ?? 0) + (stats?.pendingCount ?? 0) + (stats?.overdueCount ?? 0);
   const completionRate = totalPayments > 0 ? Math.round((stats?.paidCount ?? 0) / totalPayments * 100) : 0;
 
@@ -442,7 +445,6 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { padding: Spacing.lg, paddingBottom: 32 },
 
-  // Header
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -487,7 +489,6 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 
-  // Overdue banner
   overdueBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -509,7 +510,6 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 
-  // Hero card
   heroCard: {
     backgroundColor: Colors.primary,
     borderRadius: BorderRadius.xl,
@@ -592,7 +592,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.85)',
   },
 
-  // Quick actions
   quickRow: {
     flexDirection: 'row',
     gap: Spacing.sm,
@@ -613,7 +612,6 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 
-  // Snapshot card
   snapshotCard: {
     marginBottom: Spacing.lg,
     paddingBottom: Spacing.md,
@@ -657,7 +655,6 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.surfaceBorder,
   },
 
-  // Category rows
   sectionCard: { marginBottom: Spacing.lg },
   sectionHeader: {
     flexDirection: 'row',
@@ -707,7 +704,6 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
 
-  // Empty state
   emptyCard: {
     alignItems: 'center',
     paddingVertical: Spacing.xxl,
@@ -725,7 +721,6 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
 
-  // Weekly chart
   weekChart: {
     flexDirection: 'row',
     height: 100,
@@ -762,7 +757,6 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
 
-  // Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

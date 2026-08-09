@@ -11,6 +11,7 @@ import {
   getPaymentsByDate, getMarkedDates, updatePaymentStatus, deletePayment, getPayments
 } from '../../src/db/database';
 import { getTodayString } from '../../src/utils/helpers';
+import { cancelNotification } from '../../src/utils/notifications';
 import { Payment } from '../../src/constants/types';
 
 LocaleConfig.locales['tr'] = {
@@ -57,11 +58,15 @@ export default function PaymentsScreen() {
   const handleMonthChange = (month: any) => setCurrentMonth({ year: month.year, month: month.month });
 
   const handleMarkPaid = async (id: number) => {
+    const payment = allPayments.find(item => item.id === id);
+    if (payment?.notification_id) await cancelNotification(payment.notification_id);
     await updatePaymentStatus(id, 'paid');
     await loadPayments();
   };
 
   const handleDelete = async (id: number) => {
+    const payment = allPayments.find(item => item.id === id);
+    if (payment?.notification_id) await cancelNotification(payment.notification_id);
     await deletePayment(id);
     await loadPayments();
   };

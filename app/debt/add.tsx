@@ -53,7 +53,7 @@ export default function AddDebtScreen() {
 
   const handlePickPhoto = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: (ImagePicker.MediaType as any)?.images ?? (ImagePicker.MediaTypeOptions as any).Images,
+      mediaTypes: 'images',
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.7,

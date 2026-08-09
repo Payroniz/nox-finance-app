@@ -305,7 +305,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: Spacing.lg,
   },
-  // Weekly chart
   weeklyChart: {
     flexDirection: 'row',
     height: 140,
@@ -344,7 +343,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: Colors.textMuted,
   },
-  // Category
   catRow: { marginBottom: Spacing.md },
   catLabelRow: {
     flexDirection: 'row',
@@ -378,7 +376,6 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
     minWidth: 4,
   },
-  // Debt compare
   debtCompare: {
     flexDirection: 'row',
     alignItems: 'center',
