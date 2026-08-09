@@ -1,0 +1,90 @@
+{
+  "expo": {
+    "name": "NoX",
+    "slug": "nox-finance",
+    "version": "2.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#363636"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.nox.finance",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Ödeme ve borç ikonları için fotoğraf erişimi gereklidir.",
+        "NSCameraUsageDescription": "Profil fotoğrafı çekmek için kamera erişimi gereklidir.",
+        "NSFaceIDUsageDescription": "Uygulamayı kilitlemek için Face ID kullanılır.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.nox.finance",
+      "versionCode": 2,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1E1E2E"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.VIBRATE",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "kotlinVersion": "1.9.25"
+          }
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#6C63FF",
+          "sounds": []
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Ödeme ikonları için galeri erişimi gereklidir."
+        }
+      ],
+      "expo-local-authentication",
+      "expo-sqlite"
+    ],
+    "scheme": "nox",
+    "experiments": {
+      "typedRoutes": true
+    },
+    "newArchEnabled": true,
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "923d50fb-1994-418a-8dd3-d8b93f734fcd"
+      }
+    }
+  }
+}
