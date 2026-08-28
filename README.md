@@ -1,6 +1,8 @@
+<div align="center">
   <img src="./assets/icon.png" width="112" alt="NoX Finance app icon" />
 
   <h1>NoX Finance</h1>
+</div>
 
   <p>
     Track your payments, debts, and receivables in one place.<br />
