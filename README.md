@@ -1,4 +1,4 @@
-<div align="center">
+<img width="965" height="2048" alt="image" src="https://github.com/user-attachments/assets/a798be10-a5b7-4a14-a0f9-4b35c1c96c61" /><div align="center">
   <img src="./assets/icon.png" width="112" alt="NoX Finance app icon" />
 
   <h1>NoX Finance</h1>
@@ -39,27 +39,18 @@ NoX Finance is an Expo application for tracking one-time or recurring payments, 
 
 <table>
   <tr>
-    <td align="center"><img src="./docs/screenshots/dashboard.png" width="240" alt="NoX Finance dashboard" /></td>
-    <td align="center"><img src="./docs/screenshots/payments.png" width="240" alt="Payments and calendar screen" /></td>
-    <td align="center"><img src="./docs/screenshots/statistics.png" width="240" alt="Financial statistics screen" /></td>
-  </tr>
-  <tr>
-    <td align="center"><sub><b>Dashboard</b></sub></td>
-    <td align="center"><sub><b>Payments</b></sub></td>
-    <td align="center"><sub><b>Statistics</b></sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="./docs/screenshots/settings.png" width="240" alt="NoX Finance settings" /></td>
-    <td align="center"><img src="./docs/screenshots/security-and-data.png" width="240" alt="Security and data management settings" /></td>
-    <td align="center">
-      <b>Privacy focused</b><br /><br />
-      <sub>Local database<br />SecureStore PIN protection<br />Biometric lock<br />Privacy-aware notifications</sub>
-    </td>
-  </tr>
-  <tr>
-    <td align="center"><sub><b>Settings</b></sub></td>
-    <td align="center"><sub><b>Security and data management</b></sub></td>
-    <td></td>
+    <td align="center"><img width="965" height="2048" alt="image" src="https://github.com/user-attachments/assets/6401fa65-4d04-4102-b994-8b98914faa9d" /></td>
+    <td align="center"><img width="951" height="2048" alt="image" src="https://github.com/user-attachments/assets/1ade2721-b9d7-48e3-ab7c-c2c7d389ed68" /></td>
+    <td align="center"><img width="959" height="2048" alt="image" src="https://github.com/user-attachments/assets/5c071825-4fdf-4c7b-a8df-0074da6bc46f" /></td>
+    <td align="center"><img width="947" height="2048" alt="image" src="https://github.com/user-attachments/assets/c99b5648-46ee-4334-988a-79c0e370da90" /></td>
+    <td align="center"><img width="951" height="2048" alt="image" src="https://github.com/user-attachments/assets/ccbd4c87-7200-4f55-a767-b886341ca43b" /></td>
+    <td align="center"><img width="969" height="2048" alt="image" src="https://github.com/user-attachments/assets/8d1b198b-cda2-447e-ac59-71b631189774" /></td>
+    <td align="center"><img width="960" height="2048" alt="image" src="https://github.com/user-attachments/assets/72a803b0-748c-41cf-86bd-173d862b290a" /></td>
+    <td align="center"><img width="955" height="2048" alt="image" src="https://github.com/user-attachments/assets/d2cdb4d7-abfd-42fd-b492-1cc01c1531c7" /></td>
+    <td align="center"><img width="955" height="2048" alt="image" src="https://github.com/user-attachments/assets/7e40bf47-0346-49ed-a841-3f4673a6cca6" /></td>
+    <td align="center"><img width="962" height="2048" alt="image" src="https://github.com/user-attachments/assets/51a2bc5a-3ce1-4df1-8e51-61e24a572774" /></td>
+    <td align="center"><img width="960" height="2048" alt="image" src="https://github.com/user-attachments/assets/f3888f14-fa8f-4bc0-a0b5-67b704a1278f" /></td>
+    <td align="center"><img width="964" height="2048" alt="image" src="https://github.com/user-attachments/assets/60718b8f-a146-436d-bac9-9248cb42bcc2" /></td>
   </tr>
 </table>
 
