@@ -1,4 +1,4 @@
-<img src="./assets/icon.png" width="112" alt="NoX Finance app icon" />
+  <img src="./assets/icon.png" width="112" alt="NoX Finance app icon" />
 
   <h1>NoX Finance</h1>
 
