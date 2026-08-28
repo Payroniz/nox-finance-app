@@ -9,10 +9,11 @@ import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { Colors, Spacing, BorderRadius, FontSize, Shadow } from '../../src/constants/theme';
-import { addDebt } from '../../src/db/database';
+import { addDebt, updateDebt } from '../../src/db/database';
 import { scheduleDebtNotification } from '../../src/utils/notifications';
 import { CurrencyInput } from '../../src/components/CurrencyInput';
 import { Currency, DebtDirection } from '../../src/constants/types';
+import { formatLocalDateKey } from '../../src/utils/helpers';
 
 const CURRENCIES: { value: Currency; symbol: string; name: string }[] = [
   { value: 'TRY', symbol: '₺', name: 'Türk Lirası' },
@@ -22,6 +23,7 @@ const CURRENCIES: { value: Currency; symbol: string; name: string }[] = [
 ];
 
 const REMINDER_OPTIONS = [
+  { days: 0, label: 'Aynı gün' },
   { days: 1, label: '1 gün' },
   { days: 3, label: '3 gün' },
   { days: 7, label: '1 hafta' },
@@ -64,9 +66,10 @@ export default function AddDebtScreen() {
   };
 
   const toggleReminder = (days: number) => {
-    setReminderDays(prev =>
-      prev.includes(days) ? prev.filter(d => d !== days) : [...prev, days]
-    );
+    setReminderDays(prev => {
+      if (prev.includes(days) && prev.length === 1) return prev;
+      return prev.includes(days) ? prev.filter(d => d !== days) : [...prev, days].sort((a, b) => a - b);
+    });
     Haptics.selectionAsync();
   };
 
@@ -85,21 +88,10 @@ export default function AddDebtScreen() {
 
     setSaving(true);
     try {
-      const dueDateStr = hasDueDate ? dueDate.toISOString() : '';
+      const dueDateStr = hasDueDate ? formatLocalDateKey(dueDate) : '';
       const parsedRate = parseFloat(interestRate.replace(',', '.')) || 0;
 
-      const notifIds = await scheduleDebtNotification(
-        {
-          person_name: personName.trim(),
-          total_amount: parsedAmount,
-          currency,
-          due_date: dueDateStr,
-          debt_direction: direction,
-        },
-        reminderDays
-      );
-
-      await addDebt({
+      const debtId = await addDebt({
         person_name: personName.trim(),
         person_photo: personPhoto,
         total_amount: parsedAmount,
@@ -109,8 +101,22 @@ export default function AddDebtScreen() {
         due_date: dueDateStr,
         interest_rate: parsedRate,
         notes: notes.trim(),
-        notification_ids: JSON.stringify(notifIds),
+        reminder_days: JSON.stringify(reminderDays),
+        notification_ids: '[]',
       });
+
+      const notifIds = await scheduleDebtNotification(
+        {
+          id: debtId,
+          person_name: personName.trim(),
+          total_amount: parsedAmount,
+          currency,
+          due_date: dueDateStr,
+          debt_direction: direction,
+        },
+        reminderDays
+      );
+      await updateDebt(debtId, { notification_ids: JSON.stringify(notifIds) });
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();

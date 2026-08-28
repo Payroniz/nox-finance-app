@@ -10,10 +10,11 @@ import * as Haptics from 'expo-haptics';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { Colors, Spacing, BorderRadius, FontSize, Shadow } from '../../src/constants/theme';
 import { getPayments, updatePaymentStatus, updatePayment, deletePayment, getCategories } from '../../src/db/database';
-import { cancelNotification, schedulePaymentNotification } from '../../src/utils/notifications';
+import { cancelNotification, parseNotificationIds, parseReminderDays, schedulePaymentNotification } from '../../src/utils/notifications';
 import {
   formatCurrency, formatDateWithTime, getStatusColor,
   getStatusLabel, getStatusIcon, getRecurrenceLabel, getDueDateLabel,
+  formatLocalDateKey, parseLocalDate,
 } from '../../src/utils/helpers';
 import { Payment, Currency, RecurrenceType, IconType } from '../../src/constants/types';
 import { CurrencyInput } from '../../src/components/CurrencyInput';
@@ -60,6 +61,7 @@ const RECURRENCE: { value: RecurrenceType; label: string; icon: string }[] = [
 ];
 
 const REMINDER_OPTIONS = [
+  { days: 0, label: 'Aynı gün' },
   { days: 1, label: '1 gün' },
   { days: 3, label: '3 gün' },
   { days: 7, label: '1 hafta' },
@@ -78,7 +80,7 @@ export default function PaymentDetailScreen() {
   const [editCategory, setEditCategory] = useState('');
   const [editDueDate, setEditDueDate] = useState(new Date());
   const [editRecurrence, setEditRecurrence] = useState<RecurrenceType>('once');
-  const [editReminderDays, setEditReminderDays] = useState(3);
+  const [editReminderDays, setEditReminderDays] = useState<number[]>([1, 3]);
   const [editNotes, setEditNotes] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
@@ -106,16 +108,26 @@ export default function PaymentDetailScreen() {
     setEditAmount(String(payment.amount));
     setEditCurrency(payment.currency);
     setEditCategory(payment.category);
-    const d = new Date(payment.due_date);
+    const d = parseLocalDate(payment.due_date) ?? new Date();
     const [h, m] = payment.due_time.split(':').map(Number);
     d.setHours(h, m);
     setEditDueDate(d);
     setEditRecurrence(payment.recurrence);
-    setEditReminderDays(3);
+    setEditReminderDays(parseReminderDays(payment.reminder_days));
     setEditNotes(payment.notes);
     setEditIconType(payment.icon_type || 'icon');
     setEditIconValue(payment.icon_value || 'credit-card');
     setIsEditing(true);
+  };
+
+  const toggleEditReminder = (days: number) => {
+    setEditReminderDays(current => {
+      if (current.includes(days) && current.length === 1) return current;
+      return current.includes(days)
+        ? current.filter(value => value !== days)
+        : [...current, days].sort((a, b) => a - b);
+    });
+    Haptics.selectionAsync();
   };
 
   const handleSaveEdit = async () => {
@@ -127,15 +139,16 @@ export default function PaymentDetailScreen() {
     setSaving(true);
     try {
       if (payment.notification_id) await cancelNotification(payment.notification_id);
-      const dueDateStr = editDueDate.toISOString();
+      const dueDateStr = formatLocalDateKey(editDueDate);
       const dueTimeStr = `${String(editDueDate.getHours()).padStart(2, '0')}:${String(editDueDate.getMinutes()).padStart(2, '0')}`;
-      const notifId = await schedulePaymentNotification(
-        { name: editName, amount: parsedAmount, currency: editCurrency, due_date: dueDateStr, due_time: dueTimeStr }, editReminderDays
+      const notificationIds = await schedulePaymentNotification(
+        { id: payment.id, name: editName, amount: parsedAmount, currency: editCurrency, due_date: dueDateStr, due_time: dueTimeStr }, editReminderDays
       );
       await updatePayment(payment.id, {
         name: editName.trim(), amount: parsedAmount, currency: editCurrency,
         category: editCategory, due_date: dueDateStr, due_time: dueTimeStr,
-        recurrence: editRecurrence, notes: editNotes.trim(), notification_id: notifId,
+        recurrence: editRecurrence, notes: editNotes.trim(),
+        reminder_days: JSON.stringify(editReminderDays), notification_id: JSON.stringify(notificationIds),
         icon_type: editIconType, icon_value: editIconValue,
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -192,6 +205,9 @@ export default function PaymentDetailScreen() {
   const handleMarkPending = async () => {
     if (!payment) return;
     await updatePaymentStatus(payment.id, 'pending');
+    const reminderDays = parseReminderDays(payment.reminder_days);
+    const notificationIds = await schedulePaymentNotification({ ...payment, id: payment.id }, reminderDays);
+    await updatePayment(payment.id, { notification_id: JSON.stringify(notificationIds) });
     Haptics.selectionAsync();
     await loadPayment();
   };
@@ -314,11 +330,12 @@ export default function PaymentDetailScreen() {
             ))}
           </View>
 
-          <Text style={styles.editLabel}>Hatırlatıcı (kaç gün önce)</Text>
+          <Text style={styles.editLabel}>Hatırlatıcılar (birden fazla seçilebilir)</Text>
           <View style={[styles.editRow, { marginBottom: Spacing.lg }]}>
             {REMINDER_OPTIONS.map(opt => (
-              <TouchableOpacity key={opt.days} style={[styles.editChip, editReminderDays === opt.days && styles.editChipActive]} onPress={() => setEditReminderDays(opt.days)}>
-                <Text style={[styles.editChipText, editReminderDays === opt.days && styles.editChipTextActive]}>{opt.label}</Text>
+              <TouchableOpacity key={opt.days} style={[styles.editChip, editReminderDays.includes(opt.days) && styles.editChipActive]} onPress={() => toggleEditReminder(opt.days)}>
+                {editReminderDays.includes(opt.days) && <MaterialCommunityIcons name="check" size={13} color="#fff" />}
+                <Text style={[styles.editChipText, editReminderDays.includes(opt.days) && styles.editChipTextActive]}>{opt.label}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -445,7 +462,9 @@ export default function PaymentDetailScreen() {
           <Divider />
           <DetailRow icon="refresh" label="Tekrarlama" value={getRecurrenceLabel(payment.recurrence)} />
           {payment.notes ? (<><Divider /><DetailRow icon="note-text-outline" label="Not" value={payment.notes} /></>) : null}
-          {payment.notification_id ? (<><Divider /><DetailRow icon="bell-outline" label="Hatırlatıcı" value="Aktif" valueColor={Colors.success} /></>) : null}
+          {parseNotificationIds(payment.notification_id).length > 0 ? (
+            <><Divider /><DetailRow icon="bell-outline" label="Hatırlatıcı" value={`${parseNotificationIds(payment.notification_id).length} bildirim planlandı`} valueColor={Colors.success} /></>
+          ) : null}
         </View>
 
         <View style={styles.actionContainer}>

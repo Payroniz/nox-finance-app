@@ -12,9 +12,10 @@ import { Colors, Spacing, BorderRadius, FontSize, Shadow } from '../../src/const
 import {
   getDebtById, deleteDebt, addDebtPayment, getDebtPayments, updateDebt,
 } from '../../src/db/database';
-import { cancelMultipleNotifications, scheduleDebtNotification } from '../../src/utils/notifications';
+import { cancelMultipleNotifications, parseNotificationIds, parseReminderDays, scheduleDebtNotification } from '../../src/utils/notifications';
 import {
   formatCurrency, formatDate, getDueDateLabel, determineDebtStatus, getDebtStatusColor,
+  formatLocalDateKey, parseLocalDate,
 } from '../../src/utils/helpers';
 import { Debt, DebtPayment, Currency, DebtDirection } from '../../src/constants/types';
 import { CurrencyInput } from '../../src/components/CurrencyInput';
@@ -48,6 +49,7 @@ const CURRENCIES: { value: Currency; symbol: string }[] = [
 ];
 
 const DEBT_REMINDER_OPTIONS = [
+  { days: 0, label: 'Aynı gün' },
   { days: 1, label: '1 gün' },
   { days: 3, label: '3 gün' },
   { days: 7, label: '1 hafta' },
@@ -99,11 +101,11 @@ export default function DebtDetailScreen() {
     setEditAmount(String(debt.total_amount));
     setEditCurrency(debt.currency);
     setEditDirection(debt.debt_direction);
-    setEditDueDate(new Date(debt.due_date || Date.now()));
+    setEditDueDate(parseLocalDate(debt.due_date) ?? new Date());
     setEditHasDueDate(!!debt.due_date);
     setEditInterestRate(debt.interest_rate > 0 ? String(debt.interest_rate) : '');
     setEditShowInterest(debt.interest_rate > 0);
-    setEditReminderDays([1, 3, 7]);
+    setEditReminderDays(parseReminderDays(debt.reminder_days, [1, 3, 7]));
     setEditNotes(debt.notes);
     setEditPersonPhoto(debt.person_photo || '');
     setEditIconType((debt.person_photo ? 'gallery' : 'icon') as any);
@@ -169,14 +171,12 @@ export default function DebtDetailScreen() {
 
     setSaving(true);
     try {
-      const oldNotificationIds = (() => {
-        try { return JSON.parse(debt.notification_ids || '[]') as string[]; }
-        catch { return []; }
-      })();
+      const oldNotificationIds = parseNotificationIds(debt.notification_ids);
       await cancelMultipleNotifications(oldNotificationIds);
 
-      const dueDate = editHasDueDate ? editDueDate.toISOString() : '';
+      const dueDate = editHasDueDate ? formatLocalDateKey(editDueDate) : '';
       const notificationIds = await scheduleDebtNotification({
+        id: debt.id,
         person_name: editPersonName.trim(),
         total_amount: parsedAmount,
         currency: editCurrency,
@@ -193,6 +193,7 @@ export default function DebtDetailScreen() {
         due_date: dueDate,
         interest_rate: parseFloat(editInterestRate) || 0,
         notes: editNotes.trim(),
+        reminder_days: JSON.stringify(editReminderDays),
         notification_ids: JSON.stringify(notificationIds),
       });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -211,9 +212,7 @@ export default function DebtDetailScreen() {
         { text: 'Vazgeç', style: 'cancel' },
         { text: 'Sil', style: 'destructive', onPress: async () => {
           if (!debt) return;
-          let notifIds: string[] = [];
-          try { notifIds = JSON.parse(debt.notification_ids || '[]'); } catch { /* Bozuk eski kayıt */ }
-          await cancelMultipleNotifications(notifIds);
+          await cancelMultipleNotifications(parseNotificationIds(debt.notification_ids));
           await deleteDebt(debt.id);
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
           router.back();
@@ -235,9 +234,7 @@ export default function DebtDetailScreen() {
     try {
       await addDebtPayment({ debt_id: debt.id, amount: parsed, paid_at: new Date().toISOString(), notes: payNote.trim() });
       if (parsed >= remaining) {
-        let notifIds: string[] = [];
-        try { notifIds = JSON.parse(debt.notification_ids || '[]'); } catch { /* Bozuk eski kayıt */ }
-        await cancelMultipleNotifications(notifIds);
+        await cancelMultipleNotifications(parseNotificationIds(debt.notification_ids));
         await updateDebt(debt.id, { notification_ids: '[]' });
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -260,9 +257,7 @@ export default function DebtDetailScreen() {
         { text: 'Vazgeç', style: 'cancel' },
         { text: 'Evet', onPress: async () => {
           await addDebtPayment({ debt_id: debt.id, amount: remaining, paid_at: new Date().toISOString(), notes: 'Tamamen ödendi' });
-          let notifIds: string[] = [];
-          try { notifIds = JSON.parse(debt.notification_ids || '[]'); } catch { /* Bozuk eski kayıt */ }
-          await cancelMultipleNotifications(notifIds);
+          await cancelMultipleNotifications(parseNotificationIds(debt.notification_ids));
           await updateDebt(debt.id, { notification_ids: '[]' });
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           await loadData();
@@ -414,7 +409,10 @@ export default function DebtDetailScreen() {
               <TouchableOpacity
                 key={opt.days}
                 style={[styles.editReminderChip, editReminderDays.includes(opt.days) && styles.editReminderChipActive]}
-                onPress={() => setEditReminderDays(prev => prev.includes(opt.days) ? prev.filter(d => d !== opt.days) : [...prev, opt.days])}
+                onPress={() => setEditReminderDays(prev => {
+                  if (prev.includes(opt.days) && prev.length === 1) return prev;
+                  return prev.includes(opt.days) ? prev.filter(d => d !== opt.days) : [...prev, opt.days].sort((a, b) => a - b);
+                })}
               >
                 {editReminderDays.includes(opt.days) && (
                   <MaterialCommunityIcons name="check" size={14} color="#fff" />
@@ -589,6 +587,9 @@ export default function DebtDetailScreen() {
             </>
           ) : null}
           {debt.notes ? <DetailRow icon="note-text-outline" label="Not" value={debt.notes} /> : null}
+          {parseNotificationIds(debt.notification_ids).length > 0 ? (
+            <><Divider /><DetailRow icon="bell-outline" label="Hatırlatıcı" value={`${parseNotificationIds(debt.notification_ids).length} bildirim planlandı`} valueColor={Colors.success} /></>
+          ) : null}
         </View>
 
         <View style={styles.actionRow}>

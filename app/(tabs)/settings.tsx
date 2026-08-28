@@ -1,31 +1,41 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Switch, Alert, StatusBar, Image, TextInput, Modal, KeyboardAvoidingView, Platform
+  Switch, Alert, StatusBar, Image, TextInput, Modal, KeyboardAvoidingView, Platform, Linking
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as Sharing from 'expo-sharing';
 import * as LocalAuthentication from 'expo-local-authentication';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { Colors, Spacing, BorderRadius, FontSize } from '../../src/constants/theme';
 import { Card } from '../../src/components/Card';
-import { deleteAllData, getAllSettings, setSetting, exportData } from '../../src/db/database';
+import { deleteAllData, getAllSettings, setSetting } from '../../src/db/database';
 import {
   cancelAllNotifications,
   canScheduleNotifications,
   requestNotificationPermissions,
+  getNotificationDiagnostics,
+  rescheduleAllNotifications,
   scheduleDailySummary,
+  scheduleTestNotification,
 } from '../../src/utils/notifications';
 import {
   deleteSecurePin,
   isSecureStorageAvailable,
   setSecurePin,
 } from '../../src/utils/security';
-import { cleanupTemporaryBackups } from '../../src/utils/backups';
-import { AppSettings, Currency } from '../../src/constants/types';
+import {
+  cleanupTemporaryBackups,
+  createAutomaticBackup,
+  getAutomaticBackupCount,
+  restoreLatestAutomaticBackup,
+  restoreLatestFromSelectedFolder,
+  saveBackupToSelectedFolder,
+  shareBackup,
+} from '../../src/utils/backups';
+import { AppSettings, BackupDestination, BackupFrequency, Currency } from '../../src/constants/types';
+import { SelectionSheet } from '../../src/components/SelectionSheet';
 
 
 type SettingRowProps = {
@@ -62,6 +72,10 @@ export default function SettingsScreen() {
   const [pinConfirm, setPinConfirm] = useState('');
   const [pinStep, setPinStep] = useState<'enter' | 'confirm'>('enter');
   const [pinError, setPinError] = useState('');
+  const [activeSheet, setActiveSheet] = useState<'currency' | 'reminder' | 'autoLock' | 'backupFrequency' | 'backupDestination' | null>(null);
+  const [notificationDiagnostics, setNotificationDiagnostics] = useState({ permission: 'undetermined', scheduledCount: 0 });
+  const [automaticBackupCount, setAutomaticBackupCount] = useState(0);
+  const [backupBusy, setBackupBusy] = useState(false);
 
   useFocusEffect(useCallback(() => { loadSettings(); }, []));
 
@@ -71,11 +85,17 @@ export default function SettingsScreen() {
       await setSetting('notificationsEnabled', 'false');
       s.notificationsEnabled = false;
     }
+    const [diagnostics, backupCount] = await Promise.all([
+      getNotificationDiagnostics().catch(() => ({ permission: 'undetermined', scheduledCount: 0 })),
+      getAutomaticBackupCount().catch(() => 0),
+    ]);
+    setNotificationDiagnostics(diagnostics);
+    setAutomaticBackupCount(backupCount);
     setSettings(s);
   };
 
   const updateSetting = async (key: keyof AppSettings, value: any) => {
-    await setSetting(key, String(value));
+    await setSetting(key, Array.isArray(value) ? JSON.stringify(value) : String(value));
     setSettings(prev => prev ? { ...prev, [key]: value } : null);
   };
 
@@ -102,20 +122,8 @@ export default function SettingsScreen() {
     setShowNameModal(false);
   };
 
-  const REMINDER_OPTIONS = [1, 2, 3, 5, 7, 14];
-  const handleReminderDays = () => {
-    Alert.alert(
-      'Varsayılan Hatırlatma',
-      'Kaç gün önceden hatırlatılsın?',
-      [
-        ...REMINDER_OPTIONS.map(d => ({
-          text: `${d} gün önce${settings?.defaultReminderDays === d ? ' ✓' : ''}`,
-          onPress: () => updateSetting('defaultReminderDays', d),
-        })),
-        { text: 'İptal', style: 'cancel' as const },
-      ]
-    );
-  };
+  const REMINDER_OPTIONS = [0, 1, 2, 3, 5, 7, 14];
+  const handleReminderDays = () => setActiveSheet('reminder');
 
   const handleSummaryTimeConfirm = async (date: Date) => {
     const h = String(date.getHours()).padStart(2, '0');
@@ -137,20 +145,7 @@ export default function SettingsScreen() {
     { label: '1 Saat sonra', value: 60 },
   ];
 
-  const handleAutoLock = () => {
-    const current = settings?.autoLockMinutes ?? 1;
-    Alert.alert(
-      'Otomatik Kilitleme',
-      'Uygulama ne zaman kilitlensin?',
-      [
-        ...AUTO_LOCK_OPTIONS.map(opt => ({
-          text: opt.label + (current === opt.value ? ' ✓' : ''),
-          onPress: () => updateSetting('autoLockMinutes', opt.value),
-        })),
-        { text: 'İptal', style: 'cancel' as const },
-      ]
-    );
-  };
+  const handleAutoLock = () => setActiveSheet('autoLock');
 
   const getAutoLockLabel = (minutes: number) => {
     const opt = AUTO_LOCK_OPTIONS.find(o => o.value === minutes);
@@ -233,36 +228,43 @@ export default function SettingsScreen() {
     if (!value) {
       await cancelAllNotifications();
       await updateSetting('notificationsEnabled', false);
+      setNotificationDiagnostics(current => ({ ...current, scheduledCount: 0 }));
       return;
     }
 
     const granted = await requestNotificationPermissions();
     if (!granted) {
       await updateSetting('notificationsEnabled', false);
-      Alert.alert('İzin Gerekli', 'Bildirim izni verilmediği için hatırlatıcılar açılamadı.');
+      Alert.alert('İzin Gerekli', 'Bildirim izni verilmediği için hatırlatıcılar açılamadı.', [
+        { text: 'İptal', style: 'cancel' },
+        { text: 'Sistem Ayarlarını Aç', onPress: () => void Linking.openSettings() },
+      ]);
       return;
     }
 
     await updateSetting('notificationsEnabled', true);
-    await scheduleDailySummary(settings?.dailySummaryTime ?? '08:00');
+    const count = await rescheduleAllNotifications();
+    setNotificationDiagnostics({ permission: 'granted', scheduledCount: count + 1 });
+    Alert.alert('Bildirimler Hazır', `${count} ödeme/borç hatırlatıcısı yeniden planlandı.`);
   };
 
   const performExport = async () => {
-    let path: string | null = null;
+    if (!settings) return;
+    setBackupBusy(true);
     try {
-      if (!FileSystem.cacheDirectory) throw new Error('CACHE_UNAVAILABLE');
-      if (!(await Sharing.isAvailableAsync())) throw new Error('SHARING_UNAVAILABLE');
-
-      const data = await exportData();
-      path = `${FileSystem.cacheDirectory}nox-backup-${Date.now()}.json`;
-      await FileSystem.writeAsStringAsync(path, data, { encoding: FileSystem.EncodingType.UTF8 });
-      await Sharing.shareAsync(path, { mimeType: 'application/json' });
-    } catch (e) {
-      Alert.alert('Hata', 'Dışa aktarma sırasında hata oluştu.');
-    } finally {
-      if (path) {
-        await FileSystem.deleteAsync(path, { idempotent: true }).catch(() => undefined);
+      if (settings.backupDestination === 'device' && Platform.OS === 'android') {
+        await saveBackupToSelectedFolder();
+      } else {
+        await shareBackup();
       }
+      await loadSettings();
+      Alert.alert('Yedek Hazır', 'Yedek dosyası seçtiğiniz hedefe gönderildi.');
+    } catch (e) {
+      if ((e as Error).message !== 'DIRECTORY_PERMISSION_DENIED') {
+        Alert.alert('Yedeklenemedi', 'Yedek hedefi açılamadı veya dosya kaydedilemedi.');
+      }
+    } finally {
+      setBackupBusy(false);
     }
   };
 
@@ -275,6 +277,70 @@ export default function SettingsScreen() {
         { text: 'Yedekle', onPress: () => void performExport() },
       ]
     );
+  };
+
+  const handleAutomaticBackupToggle = async (value: boolean) => {
+    await updateSetting('automaticBackupEnabled', value);
+    if (!value) return;
+    setBackupBusy(true);
+    try {
+      await createAutomaticBackup();
+      await loadSettings();
+      Alert.alert('Otomatik Yedekleme Açıldı', 'Güvenli yerel yedek oluşturuldu; en yeni 5 kopya saklanacak.');
+    } catch {
+      await updateSetting('automaticBackupEnabled', false);
+      Alert.alert('Yedekleme Açılamadı', 'Cihaz depolama alanı kullanılamıyor.');
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const finishRestore = async (restore: () => Promise<string>) => {
+    setBackupBusy(true);
+    try {
+      const fileName = await restore();
+      await rescheduleAllNotifications().catch(() => 0);
+      await loadSettings();
+      Alert.alert('Geri Yükleme Tamamlandı', `${fileName} yedeği başarıyla geri yüklendi.`);
+    } catch (e) {
+      const message = (e as Error).message;
+      if (message !== 'DIRECTORY_PERMISSION_DENIED') {
+        Alert.alert('Geri Yüklenemedi', message === 'BACKUP_NOT_FOUND'
+          ? 'Seçilen konumda NoX JSON yedeği bulunamadı.'
+          : 'Yedek dosyası geçersiz veya okunamıyor.');
+      }
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const handleTestNotification = async () => {
+    try {
+      await scheduleTestNotification();
+      Alert.alert('Test Planlandı', 'Bildirim yaklaşık 2 saniye içinde gelecek.');
+      const diagnostics = await getNotificationDiagnostics();
+      setNotificationDiagnostics(diagnostics);
+    } catch {
+      Alert.alert('Bildirim Gönderilemedi', 'Bildirimleri açın ve sistem ayarlarında NoX iznini kontrol edin.', [
+        { text: 'İptal', style: 'cancel' },
+        { text: 'Sistem Ayarlarını Aç', onPress: () => void Linking.openSettings() },
+      ]);
+    }
+  };
+
+  const handleRepairNotifications = async () => {
+    if (!settings?.notificationsEnabled) {
+      Alert.alert('Bildirimler Kapalı', 'Önce bildirimleri açın.');
+      return;
+    }
+    try {
+      const count = await rescheduleAllNotifications();
+      const diagnostics = await getNotificationDiagnostics();
+      setNotificationDiagnostics(diagnostics);
+      Alert.alert('Hatırlatıcılar Yenilendi', `${count} ödeme ve borç bildirimi yeniden planlandı.`);
+    } catch {
+      Alert.alert('Yenilenemedi', 'Sistem bildirim iznini kontrol edip tekrar deneyin.');
+    }
   };
 
   const handleDeleteAllData = async () => {
@@ -295,6 +361,18 @@ export default function SettingsScreen() {
   const CURRENCY_LABELS: Record<Currency, string> = {
     TRY: '₺ Türk Lirası', USD: '$ Amerikan Doları', EUR: '€ Euro', GBP: '£ İngiliz Sterlini'
   };
+  const BACKUP_DESTINATION_LABELS: Record<BackupDestination, string> = {
+    device: 'Cihaz / Klasör',
+    'google-drive': 'Google Drive',
+    dropbox: 'Dropbox',
+    onedrive: 'OneDrive',
+    share: 'Diğer Uygulamalar',
+  };
+  const BACKUP_FREQUENCY_LABELS: Record<BackupFrequency, string> = {
+    daily: 'Günlük',
+    weekly: 'Haftalık',
+    monthly: 'Aylık',
+  };
 
   if (!settings) return null;
 
@@ -303,6 +381,11 @@ export default function SettingsScreen() {
     const d = new Date();
     d.setHours(h, m, 0, 0);
     return d;
+  })();
+  const lastBackupLabel = (() => {
+    if (!settings.lastBackupAt) return '';
+    const date = new Date(settings.lastBackupAt);
+    return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('tr-TR');
   })();
 
   return (
@@ -346,14 +429,7 @@ export default function SettingsScreen() {
           <SettingRow
             icon="translate"
             label="Para Birimi"
-            onPress={() => {
-              Alert.alert('Para Birimi Seç', '',
-                CURRENCIES.map(c => ({
-                  text: CURRENCY_LABELS[c] + (settings.defaultCurrency === c ? ' ✓' : ''),
-                  onPress: () => updateSetting('defaultCurrency', c),
-                }))
-              );
-            }}
+            onPress={() => setActiveSheet('currency')}
           >
             <Text style={styles.settingValue}>{settings.defaultCurrency}</Text>
           </SettingRow>
@@ -373,7 +449,11 @@ export default function SettingsScreen() {
           <View style={styles.divider} />
           <SettingRow icon="clock-alert" label="Varsayılan Hatırlatma" onPress={handleReminderDays}>
             <View style={styles.settingValueRow}>
-              <Text style={styles.settingValue}>{settings.defaultReminderDays} gün önce</Text>
+              <Text style={styles.settingValue}>
+                {settings.defaultReminderDays.length === 1
+                  ? (settings.defaultReminderDays[0] === 0 ? 'Aynı gün' : `${settings.defaultReminderDays[0]} gün önce`)
+                  : `${settings.defaultReminderDays.length} zaman seçili`}
+              </Text>
               <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.textMuted} />
             </View>
           </SettingRow>
@@ -381,6 +461,19 @@ export default function SettingsScreen() {
           <SettingRow icon="weather-sunset-up" label="Günlük Özet Saati" onPress={() => setShowSummaryTimePicker(true)}>
             <View style={styles.settingValueRow}>
               <Text style={styles.settingValue}>{settings.dailySummaryTime}</Text>
+              <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.textMuted} />
+            </View>
+          </SettingRow>
+          <View style={styles.divider} />
+          <SettingRow icon="calendar-refresh-outline" label="Hatırlatıcıları Yenile" onPress={handleRepairNotifications}>
+            <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.textMuted} />
+          </SettingRow>
+          <View style={styles.divider} />
+          <SettingRow icon="bell-check-outline" label="Test Bildirimi" onPress={handleTestNotification}>
+            <View style={styles.settingValueRow}>
+              <Text style={[styles.settingValue, { color: settings.notificationsEnabled && notificationDiagnostics.permission === 'granted' ? Colors.success : Colors.warning }]}>
+                {!settings.notificationsEnabled ? 'Kapalı' : notificationDiagnostics.permission === 'granted' ? `${notificationDiagnostics.scheduledCount} planlı` : 'İzin gerekli'}
+              </Text>
               <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.textMuted} />
             </View>
           </SettingRow>
@@ -422,9 +515,71 @@ export default function SettingsScreen() {
         {/* Veri */}
         <Text style={styles.sectionLabel}>VERİ YÖNETİMİ</Text>
         <Card style={styles.settingCard}>
-          <SettingRow icon="export" label="Yedekle (JSON)" onPress={handleExport}>
+          <SettingRow icon="cloud-sync-outline" label="Otomatik Yedekleme">
+            <Switch
+              value={settings.automaticBackupEnabled}
+              onValueChange={handleAutomaticBackupToggle}
+              disabled={backupBusy}
+              trackColor={{ false: Colors.surfaceBorder, true: Colors.primary }}
+              thumbColor="#fff"
+            />
+          </SettingRow>
+          <View style={styles.divider} />
+          <SettingRow icon="calendar-sync" label="Yedek Sıklığı" onPress={() => setActiveSheet('backupFrequency')}>
+            <View style={styles.settingValueRow}>
+              <Text style={styles.settingValue}>{BACKUP_FREQUENCY_LABELS[settings.backupFrequency]}</Text>
+              <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.textMuted} />
+            </View>
+          </SettingRow>
+          <View style={styles.divider} />
+          <SettingRow icon="cloud-outline" label="Yedekleme Aracı" onPress={() => setActiveSheet('backupDestination')}>
+            <View style={styles.settingValueRow}>
+              <Text style={styles.settingValue}>{BACKUP_DESTINATION_LABELS[settings.backupDestination]}</Text>
+              <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.textMuted} />
+            </View>
+          </SettingRow>
+          <View style={styles.divider} />
+          <SettingRow icon="backup-restore" label={backupBusy ? 'İşlem Sürüyor...' : 'Şimdi Yedekle'} onPress={backupBusy ? undefined : handleExport}>
             <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.textMuted} />
           </SettingRow>
+          {Platform.OS === 'android' ? (
+            <>
+              <View style={styles.divider} />
+              <SettingRow
+                icon="folder-upload-outline"
+                label="Klasörden Geri Yükle"
+                onPress={backupBusy ? undefined : () => Alert.alert(
+                  'Yedeği Geri Yükle',
+                  'Mevcut finans kayıtları seçilen klasördeki en yeni NoX yedeğiyle değiştirilecek.',
+                  [
+                    { text: 'İptal', style: 'cancel' },
+                    { text: 'Devam Et', onPress: () => void finishRestore(restoreLatestFromSelectedFolder) },
+                  ]
+                )}
+              >
+                <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.textMuted} />
+              </SettingRow>
+            </>
+          ) : null}
+          {automaticBackupCount > 0 ? (
+            <>
+              <View style={styles.divider} />
+              <SettingRow
+                icon="history"
+                label={`Son Otomatik Yedeği Geri Yükle (${automaticBackupCount})`}
+                onPress={backupBusy ? undefined : () => Alert.alert(
+                  'Otomatik Yedeği Geri Yükle',
+                  'Mevcut finans kayıtları en yeni otomatik yedekle değiştirilecek.',
+                  [
+                    { text: 'İptal', style: 'cancel' },
+                    { text: 'Geri Yükle', onPress: () => void finishRestore(restoreLatestAutomaticBackup) },
+                  ]
+                )}
+              >
+                <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.textMuted} />
+              </SettingRow>
+            </>
+          ) : null}
           <View style={styles.divider} />
           <SettingRow
             icon="delete-alert"
@@ -442,10 +597,22 @@ export default function SettingsScreen() {
           </SettingRow>
         </Card>
 
+        <View style={styles.backupStatusCard}>
+          <View style={styles.backupStatusIcon}>
+            <MaterialCommunityIcons name={lastBackupLabel ? 'shield-check' : 'shield-alert-outline'} size={20} color={lastBackupLabel ? Colors.success : Colors.warning} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.backupStatusTitle}>{lastBackupLabel ? 'Verileriniz yedeklendi' : 'Henüz yedek yok'}</Text>
+            <Text style={styles.backupStatusText}>
+              {lastBackupLabel ? `Son yedek: ${lastBackupLabel}` : 'Veri kaybına karşı ilk yedeğinizi oluşturun.'}
+            </Text>
+          </View>
+        </View>
+
         <Text style={styles.sectionLabel}>HAKKINDA</Text>
         <Card style={styles.settingCard}>
           <SettingRow icon="information" label="NoX Finance">
-            <Text style={styles.settingValue}>v2.0.0</Text>
+            <Text style={styles.settingValue}>v3.0.0</Text>
           </SettingRow>
         </Card>
 
@@ -532,6 +699,88 @@ export default function SettingsScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      <SelectionSheet
+        visible={activeSheet === 'currency'}
+        title="Para Birimi"
+        subtitle="Yeni kayıtlarda varsayılan olarak kullanılacak para birimini seçin."
+        options={CURRENCIES.map(currency => ({
+          value: currency,
+          label: CURRENCY_LABELS[currency],
+          icon: 'cash-multiple',
+        }))}
+        selectedValues={[settings.defaultCurrency]}
+        onClose={() => setActiveSheet(null)}
+        onConfirm={values => updateSetting('defaultCurrency', values[0] as Currency)}
+      />
+
+      <SelectionSheet
+        visible={activeSheet === 'reminder'}
+        title="Varsayılan Hatırlatıcılar"
+        subtitle="Ödeme ve borçlar için birden fazla zaman seçebilirsiniz."
+        options={REMINDER_OPTIONS.map(days => ({
+          value: String(days),
+          label: days === 0 ? 'Aynı gün' : `${days} gün önce`,
+          description: days === 0 ? 'Vade saatinde bir kez daha hatırlatır.' : `Vade tarihinden ${days} gün önce bildirim gönderir.`,
+          icon: days === 0 ? 'calendar-today' : 'clock-alert-outline',
+        }))}
+        selectedValues={settings.defaultReminderDays.map(String)}
+        multiple
+        confirmLabel="Hatırlatıcıları Kaydet"
+        onClose={() => setActiveSheet(null)}
+        onConfirm={async values => {
+          const days = values.map(Number).sort((a, b) => a - b);
+          await updateSetting('defaultReminderDays', days);
+          if (settings.notificationsEnabled) {
+            const count = await rescheduleAllNotifications();
+            setNotificationDiagnostics(current => ({ ...current, scheduledCount: count + 1 }));
+          }
+        }}
+      />
+
+      <SelectionSheet
+        visible={activeSheet === 'autoLock'}
+        title="Otomatik Kilitleme"
+        subtitle="Uygulama arka plana geçtikten sonra ne zaman kilitleneceğini seçin."
+        options={AUTO_LOCK_OPTIONS.map(option => ({
+          value: String(option.value),
+          label: option.label,
+          icon: option.value === 0 ? 'lock-alert' : 'timer-lock-outline',
+        }))}
+        selectedValues={[String(settings.autoLockMinutes ?? 1)]}
+        onClose={() => setActiveSheet(null)}
+        onConfirm={values => updateSetting('autoLockMinutes', Number(values[0]))}
+      />
+
+      <SelectionSheet
+        visible={activeSheet === 'backupFrequency'}
+        title="Yedek Sıklığı"
+        subtitle="Uygulama açıldığında süresi dolan yerel yedek otomatik oluşturulur."
+        options={[
+          { value: 'daily', label: 'Günlük', description: 'Her gün yeni bir güvenli kopya.', icon: 'calendar-today' },
+          { value: 'weekly', label: 'Haftalık', description: 'Dengeli depolama kullanımı.', icon: 'calendar-week' },
+          { value: 'monthly', label: 'Aylık', description: 'Daha seyrek arşivleme.', icon: 'calendar-month' },
+        ]}
+        selectedValues={[settings.backupFrequency]}
+        onClose={() => setActiveSheet(null)}
+        onConfirm={values => updateSetting('backupFrequency', values[0] as BackupFrequency)}
+      />
+
+      <SelectionSheet
+        visible={activeSheet === 'backupDestination'}
+        title="Yedekleme Aracı"
+        subtitle="Bulut hesapları, cihazınızdaki ilgili uygulamanın güvenli paylaşım ekranından bağlanır."
+        options={[
+          { value: 'device', label: 'Cihaz / Seçilen Klasör', description: 'Dosyayı telefonunuzda seçeceğiniz klasöre kaydeder.', icon: 'folder-outline', color: Colors.info },
+          { value: 'google-drive', label: 'Google Drive', description: 'Drive uygulamasındaki Google hesabınızı kullanır.', icon: 'google-drive', color: '#4285F4' },
+          { value: 'dropbox', label: 'Dropbox', description: 'Dropbox uygulamasındaki hesabınızı kullanır.', icon: 'dropbox', color: '#0061FF' },
+          { value: 'onedrive', label: 'Microsoft OneDrive', description: 'OneDrive uygulamasındaki Microsoft hesabınızı kullanır.', icon: 'microsoft-onedrive', color: '#28A8EA' },
+          { value: 'share', label: 'Diğer Uygulamalar', description: 'Dosyalar, iCloud Drive, e-posta veya kurulu başka bir uygulama.', icon: 'share-variant-outline', color: Colors.success },
+        ]}
+        selectedValues={[settings.backupDestination]}
+        onClose={() => setActiveSheet(null)}
+        onConfirm={values => updateSetting('backupDestination', values[0] as BackupDestination)}
+      />
+
       {/* Günlük özet saati picker */}
       <DateTimePickerModal
         isVisible={showSummaryTimePicker}
@@ -590,6 +839,17 @@ const styles = StyleSheet.create({
   settingValue: { fontFamily: 'Poppins_500Medium', fontSize: 13, color: Colors.textSecondary },
   settingValueRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   divider: { height: 1, backgroundColor: Colors.surfaceBorder, marginHorizontal: Spacing.md },
+  backupStatusCard: {
+    flexDirection: 'row', alignItems: 'center', gap: Spacing.md,
+    backgroundColor: `${Colors.primary}10`, borderWidth: 1, borderColor: `${Colors.primary}35`,
+    borderRadius: BorderRadius.lg, padding: Spacing.md, marginBottom: Spacing.lg,
+  },
+  backupStatusIcon: {
+    width: 40, height: 40, borderRadius: BorderRadius.md,
+    backgroundColor: Colors.surfaceLight, alignItems: 'center', justifyContent: 'center',
+  },
+  backupStatusTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: FontSize.sm, color: Colors.textPrimary },
+  backupStatusText: { fontFamily: 'Poppins_400Regular', fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: Spacing.xl },
   nameModal: {
     backgroundColor: Colors.surface,

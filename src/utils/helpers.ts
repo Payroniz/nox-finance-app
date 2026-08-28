@@ -1,6 +1,26 @@
-import { format, parseISO, isBefore, differenceInDays } from 'date-fns';
+import { format, isBefore, differenceInDays } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Currency, PaymentStatus, DebtStatus } from '../constants/types';
+
+export const formatLocalDateKey = (date: Date): string => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+export const parseLocalDate = (dateStr: string): Date | null => {
+  if (!dateStr) return null;
+
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
+  if (dateOnly) {
+    const parsed = new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]));
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  const parsed = new Date(dateStr);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
 
 export const formatCurrency = (amount: number, currency: Currency = 'TRY'): string => {
   switch (currency) {
@@ -18,11 +38,12 @@ export const formatCurrency = (amount: number, currency: Currency = 'TRY'): stri
 };
 
 export const formatDate = (dateStr: string, pattern: string = 'dd MMMM yyyy'): string => {
+  const date = parseLocalDate(dateStr);
+  if (!date) return 'Tarih belirtilmedi';
   try {
-    const date = parseISO(dateStr);
     return format(date, pattern, { locale: tr });
   } catch {
-    return dateStr;
+    return 'Tarih belirtilmedi';
   }
 };
 
@@ -32,7 +53,8 @@ export const formatDateShort = (dateStr: string): string => {
 
 export const formatDateWithTime = (dateStr: string, timeStr: string): string => {
   try {
-    const date = parseISO(dateStr);
+    const date = parseLocalDate(dateStr);
+    if (!date) return 'Tarih belirtilmedi';
     const [h, m] = timeStr.split(':');
     date.setHours(parseInt(h), parseInt(m));
     return format(date, 'dd MMMM yyyy, HH:mm', { locale: tr });
@@ -50,12 +72,13 @@ export const getGreeting = (): string => {
 };
 
 export const getTodayString = (): string => {
-  return new Date().toISOString().split('T')[0];
+  return formatLocalDateKey(new Date());
 };
 
 export const determinePaymentStatus = (dueDate: string, currentStatus: PaymentStatus): PaymentStatus => {
   if (currentStatus === 'paid') return 'paid';
-  const due = parseISO(dueDate);
+  const due = parseLocalDate(dueDate);
+  if (!due) return currentStatus;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   if (isBefore(due, today)) return 'overdue';
@@ -64,7 +87,8 @@ export const determinePaymentStatus = (dueDate: string, currentStatus: PaymentSt
 
 export const determineDebtStatus = (dueDate: string): DebtStatus => {
   if (!dueDate) return 'ontime';
-  const due = parseISO(dueDate);
+  const due = parseLocalDate(dueDate);
+  if (!due) return 'ontime';
   const today = new Date();
   if (isBefore(due, today)) return 'overdue';
   if (differenceInDays(due, today) <= 7) return 'approaching';
@@ -114,7 +138,8 @@ export const getRecurrenceLabel = (recurrence: string): string => {
 };
 
 export const getDaysUntilDue = (dueDate: string): number => {
-  const due = parseISO(dueDate);
+  const due = parseLocalDate(dueDate);
+  if (!due) return Number.POSITIVE_INFINITY;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return differenceInDays(due, today);
@@ -140,7 +165,8 @@ export const generateColors = (count: number): string[] => {
 
 export const getTimeRemaining = (dueDate: string, dueTime?: string): string => {
   try {
-    const due = parseISO(dueDate);
+    const due = parseLocalDate(dueDate);
+    if (!due) return '';
     if (dueTime) {
       const [h, m] = dueTime.split(':').map(Number);
       due.setHours(h, m, 0, 0);

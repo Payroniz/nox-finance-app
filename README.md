@@ -29,9 +29,10 @@ NoX Finance is an Expo application for tracking one-time or recurring payments, 
 - Due dates, interest rates, and multiple reminders for debts
 - Monthly spending summaries, weekly trends, and category breakdowns
 - Support for TRY, USD, EUR, and GBP
-- Local notifications controlled by the user
+- Multiple local reminder times for payments, debts, and receivables
+- Detailed in-app notification center with deep links to each record
 - PIN protection, biometric authentication, and automatic locking
-- Controlled JSON data export
+- Automatic rotating local backups, JSON export, folder restore, and cloud-provider sharing
 - Secure in-app deletion of all application data
 
 ## Screenshots

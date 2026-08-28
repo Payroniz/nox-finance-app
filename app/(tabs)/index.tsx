@@ -13,11 +13,31 @@ import {
   getMonthlyStats, getUpcomingPayments, updatePaymentStatus,
   deletePayment, getAllSettings, getDebts, getPayments
 } from '../../src/db/database';
-import { formatCurrency, getGreeting, getDaysUntilDue } from '../../src/utils/helpers';
-import { Payment, Debt } from '../../src/constants/types';
+import {
+  formatCurrency,
+  formatDate,
+  formatLocalDateKey,
+  getDueDateLabel,
+  getGreeting,
+  parseLocalDate,
+} from '../../src/utils/helpers';
+import { Payment } from '../../src/constants/types';
 import { cancelNotification } from '../../src/utils/notifications';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+type InAppNotification = {
+  id: string;
+  entityId: number;
+  route: 'payment' | 'debt';
+  title: string;
+  name: string;
+  amount: string;
+  detail: string;
+  color: string;
+  icon: string;
+  dueDate: number;
+};
 
 export default function Dashboard() {
   const [stats, setStats] = useState<any>(null);
@@ -27,7 +47,7 @@ export default function Dashboard() {
   const [userName, setUserName] = useState('Kullanıcı');
   const [refreshing, setRefreshing] = useState(false);
   const [showNotifPanel, setShowNotifPanel] = useState(false);
-  const [notifications, setNotifications] = useState<Array<{ type: string; title: string; body: string; color: string; icon: string }>>([]);
+  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
   const [debtSummary, setDebtSummary] = useState({ totalOwe: 0, totalOwed: 0, netDebt: 0 });
   const [currency, setCurrency] = useState<'TRY' | 'USD' | 'EUR' | 'GBP'>('TRY');
 
@@ -35,30 +55,58 @@ export default function Dashboard() {
   const greeting = getGreeting();
 
   const buildNotifications = async () => {
-    const todayStr = today.toISOString().split('T')[0];
-    const in3Days = new Date(today);
-    in3Days.setDate(today.getDate() + 3);
-    const in3Str = in3Days.toISOString().split('T')[0];
-    const [upcoming, oweDebts, owedDebts] = await Promise.all([
-      getUpcomingPayments(10),
+    const horizon = new Date();
+    horizon.setDate(horizon.getDate() + 7);
+    const horizonKey = formatLocalDateKey(horizon);
+    const [payments, oweDebts, owedDebts] = await Promise.all([
+      getPayments(),
       getDebts('owe'),
       getDebts('owed'),
     ]);
-    const notifs: Array<{ type: string; title: string; body: string; color: string; icon: string }> = [];
-    upcoming.forEach(p => {
-      if (p.due_date <= todayStr) {
-        notifs.push({ type: 'overdue', title: 'Gecikmiş Ödeme', body: `${p.name} · ${p.amount.toLocaleString('tr-TR')} ${p.currency}`, color: Colors.danger, icon: 'alert-circle' });
-      } else if (p.due_date <= in3Str) {
-        notifs.push({ type: 'soon', title: 'Yaklaşan Ödeme', body: `${p.name} · ${new Date(p.due_date + 'T00:00:00').toLocaleDateString('tr-TR')}`, color: Colors.primary, icon: 'clock-alert-outline' });
-      }
-    });
-    oweDebts.filter(d => d.due_date && d.due_date.split('T')[0] <= in3Str).forEach(d => {
-      notifs.push({ type: 'debt', title: 'Yaklaşan Borç', body: `${d.person_name} · ${(d.total_amount - d.paid_amount).toLocaleString('tr-TR')} ${d.currency}`, color: Colors.danger, icon: 'arrow-up-circle' });
-    });
-    owedDebts.filter(d => d.due_date && d.due_date.split('T')[0] <= in3Str).forEach(d => {
-      notifs.push({ type: 'owed', title: 'Yaklaşan Alacak', body: `${d.person_name} · ${(d.total_amount - d.paid_amount).toLocaleString('tr-TR')} ${d.currency}`, color: Colors.success, icon: 'arrow-down-circle' });
-    });
-    setNotifications(notifs);
+    const notifs: InAppNotification[] = [];
+
+    payments
+      .filter(payment => payment.status !== 'paid' && payment.due_date <= horizonKey)
+      .forEach(payment => {
+        const due = parseLocalDate(payment.due_date);
+        if (!due) return;
+        const overdue = due.getTime() < new Date().setHours(0, 0, 0, 0);
+        notifs.push({
+          id: `payment-${payment.id}`,
+          entityId: payment.id,
+          route: 'payment',
+          title: overdue ? 'Gecikmiş ödeme' : 'Ödeme yaklaşıyor',
+          name: payment.name,
+          amount: formatCurrency(payment.amount, payment.currency),
+          detail: `${getDueDateLabel(payment.due_date)} · ${formatDate(payment.due_date, 'dd MMMM')} · ${payment.due_time} · ${payment.category}`,
+          color: overdue ? Colors.danger : Colors.primary,
+          icon: overdue ? 'alert-circle' : 'clock-alert-outline',
+          dueDate: due.getTime(),
+        });
+      });
+
+    [...oweDebts, ...owedDebts]
+      .filter(debt => debt.due_date && debt.total_amount > debt.paid_amount && debt.due_date <= horizonKey)
+      .forEach(debt => {
+        const due = parseLocalDate(debt.due_date);
+        if (!due) return;
+        const overdue = due.getTime() < new Date().setHours(0, 0, 0, 0);
+        const receivable = debt.debt_direction === 'owed';
+        notifs.push({
+          id: `debt-${debt.id}`,
+          entityId: debt.id,
+          route: 'debt',
+          title: overdue ? (receivable ? 'Gecikmiş alacak' : 'Gecikmiş borç') : (receivable ? 'Alacak yaklaşıyor' : 'Borç yaklaşıyor'),
+          name: debt.person_name,
+          amount: formatCurrency(debt.total_amount - debt.paid_amount, debt.currency),
+          detail: `${getDueDateLabel(debt.due_date)} · ${formatDate(debt.due_date, 'dd MMMM yyyy')}`,
+          color: overdue ? Colors.danger : (receivable ? Colors.success : Colors.warning),
+          icon: receivable ? 'arrow-down-circle' : 'arrow-up-circle',
+          dueDate: due.getTime(),
+        });
+      });
+
+    setNotifications(notifs.sort((a, b) => a.dueDate - b.dueDate));
   };
 
   const loadData = async () => {
@@ -395,7 +443,10 @@ export default function Dashboard() {
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowNotifPanel(false)}>
           <View style={styles.notifPanel}>
             <View style={styles.notifPanelHeader}>
-              <Text style={styles.notifPanelTitle}>Bildirimler</Text>
+              <View>
+                <Text style={styles.notifPanelTitle}>Bildirim Merkezi</Text>
+                <Text style={styles.notifPanelSubtitle}>{notifications.length} finansal hareket dikkat bekliyor</Text>
+              </View>
               <TouchableOpacity onPress={() => setShowNotifPanel(false)}>
                 <MaterialCommunityIcons name="close" size={22} color={Colors.textSecondary} />
               </TouchableOpacity>
@@ -407,15 +458,32 @@ export default function Dashboard() {
                 <Text style={styles.notifEmptySubText}>Yaklaşan ödeme veya borç bulunamadı</Text>
               </View>
             ) : (
-              notifications.map((n, i) => (
-                <View key={i} style={[styles.notifItem, { borderLeftColor: n.color }]}>
-                  <MaterialCommunityIcons name={n.icon as any} size={22} color={n.color} />
-                  <View style={styles.notifItemText}>
-                    <Text style={styles.notifItemTitle}>{n.title}</Text>
-                    <Text style={styles.notifItemBody}>{n.body}</Text>
-                  </View>
-                </View>
-              ))
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {notifications.map(n => (
+                  <TouchableOpacity
+                    key={n.id}
+                    style={[styles.notifItem, { borderLeftColor: n.color }]}
+                    activeOpacity={0.78}
+                    onPress={() => {
+                      setShowNotifPanel(false);
+                      router.push(n.route === 'payment' ? `/payment/${n.entityId}` : `/debt/${n.entityId}`);
+                    }}
+                  >
+                    <View style={[styles.notifItemIcon, { backgroundColor: `${n.color}1F` }]}>
+                      <MaterialCommunityIcons name={n.icon as any} size={22} color={n.color} />
+                    </View>
+                    <View style={styles.notifItemText}>
+                      <View style={styles.notifItemTopRow}>
+                        <Text style={[styles.notifItemType, { color: n.color }]}>{n.title}</Text>
+                        <Text style={styles.notifItemAmount}>{n.amount}</Text>
+                      </View>
+                      <Text style={styles.notifItemTitle}>{n.name}</Text>
+                      <Text style={styles.notifItemBody}>{n.detail}</Text>
+                    </View>
+                    <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.textMuted} />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
             )}
           </View>
         </TouchableOpacity>
@@ -764,10 +832,14 @@ const styles = StyleSheet.create({
   },
   notifPanel: {
     backgroundColor: Colors.surface,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
     padding: 24,
     paddingBottom: 40,
+    maxHeight: '76%',
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: Colors.surfaceBorder,
   },
   notifPanelHeader: {
     flexDirection: 'row',
@@ -779,6 +851,12 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_700Bold',
     fontSize: FontSize.xl,
     color: Colors.textPrimary,
+  },
+  notifPanelSubtitle: {
+    fontFamily: 'Poppins_400Regular',
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    marginTop: 2,
   },
   notifEmpty: {
     alignItems: 'center',
@@ -802,15 +880,34 @@ const styles = StyleSheet.create({
     gap: 12,
     backgroundColor: Colors.surfaceLight,
     borderRadius: BorderRadius.md,
-    padding: 12,
-    marginBottom: 8,
+    padding: 13,
+    marginBottom: 10,
     borderLeftWidth: 3,
   },
+  notifItemIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: BorderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   notifItemText: { flex: 1 },
+  notifItemTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm },
+  notifItemType: {
+    flex: 1,
+    fontFamily: 'Poppins_600SemiBold',
+    fontSize: FontSize.xs,
+  },
+  notifItemAmount: {
+    fontFamily: 'Poppins_700Bold',
+    fontSize: FontSize.xs,
+    color: Colors.textPrimary,
+  },
   notifItemTitle: {
     fontFamily: 'Poppins_600SemiBold',
-    fontSize: FontSize.sm,
+    fontSize: FontSize.md,
     color: Colors.textPrimary,
+    marginTop: 2,
   },
   notifItemBody: {
     fontFamily: 'Poppins_400Regular',

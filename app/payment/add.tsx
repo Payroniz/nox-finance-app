@@ -9,10 +9,11 @@ import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { Colors, Spacing, BorderRadius, FontSize, Shadow } from '../../src/constants/theme';
-import { addPayment, getCategories } from '../../src/db/database';
+import { addPayment, getAllSettings, getCategories, updatePayment } from '../../src/db/database';
 import { schedulePaymentNotification } from '../../src/utils/notifications';
 import { CurrencyInput } from '../../src/components/CurrencyInput';
 import { Currency, RecurrenceType } from '../../src/constants/types';
+import { formatLocalDateKey } from '../../src/utils/helpers';
 
 const CURRENCIES: { value: Currency; symbol: string }[] = [
   { value: 'TRY', symbol: '₺' },
@@ -59,6 +60,7 @@ const QUICK_ICONS = [
 ];
 
 const REMINDER_OPTIONS = [
+  { days: 0, label: 'Aynı gün' },
   { days: 1, label: '1 gün' },
   { days: 3, label: '3 gün' },
   { days: 7, label: '1 hafta' },
@@ -83,7 +85,7 @@ export default function AddPaymentScreen() {
   const [dueDate, setDueDate] = useState(new Date());
   const [recurrence, setRecurrence] = useState<RecurrenceType>('once');
   const [notes, setNotes] = useState('');
-  const [reminderDays, setReminderDays] = useState(3);
+  const [reminderDays, setReminderDays] = useState<number[]>([1, 3]);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
@@ -93,8 +95,22 @@ export default function AddPaymentScreen() {
   const [emojiInput, setEmojiInput] = useState('');
 
   useFocusEffect(useCallback(() => {
-    getCategories().then(setCategories);
+    Promise.all([getCategories(), getAllSettings()]).then(([categoryList, appSettings]) => {
+      setCategories(categoryList);
+      setReminderDays(appSettings.defaultReminderDays);
+      setCurrency(appSettings.defaultCurrency);
+    });
   }, []));
+
+  const toggleReminder = (days: number) => {
+    setReminderDays(current => {
+      if (current.includes(days) && current.length === 1) return current;
+      return current.includes(days)
+        ? current.filter(value => value !== days)
+        : [...current, days].sort((a, b) => a - b);
+    });
+    Haptics.selectionAsync();
+  };
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -111,15 +127,10 @@ export default function AddPaymentScreen() {
 
     setSaving(true);
     try {
-      const dueDateStr = dueDate.toISOString();
+      const dueDateStr = formatLocalDateKey(dueDate);
       const dueTimeStr = `${String(dueDate.getHours()).padStart(2, '0')}:${String(dueDate.getMinutes()).padStart(2, '0')}`;
 
-      const notifId = await schedulePaymentNotification(
-        { name, amount: parsedAmount, currency, due_date: dueDateStr, due_time: dueTimeStr },
-        reminderDays
-      );
-
-      await addPayment({
+      const paymentId = await addPayment({
         name: name.trim(),
         amount: parsedAmount,
         currency,
@@ -131,8 +142,15 @@ export default function AddPaymentScreen() {
         recurrence,
         status: 'pending',
         notes: notes.trim(),
-        notification_id: notifId,
+        reminder_days: JSON.stringify(reminderDays),
+        notification_id: '[]',
       });
+
+      const notificationIds = await schedulePaymentNotification(
+        { id: paymentId, name, amount: parsedAmount, currency, due_date: dueDateStr, due_time: dueTimeStr },
+        reminderDays
+      );
+      await updatePayment(paymentId, { notification_id: JSON.stringify(notificationIds) });
 
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       router.back();
@@ -310,15 +328,18 @@ export default function AddPaymentScreen() {
         </InputGroup>
 
         {/* Hatırlatıcı */}
-        <InputGroup label="Hatırlatıcı (kaç gün önce)">
+        <InputGroup label="Hatırlatıcılar (birden fazla seçilebilir)">
           <View style={styles.reminderRow}>
             {REMINDER_OPTIONS.map(opt => (
               <TouchableOpacity
                 key={opt.days}
-                style={[styles.recBtn, reminderDays === opt.days && styles.recBtnActive]}
-                onPress={() => setReminderDays(opt.days)}
+                style={[styles.recBtn, reminderDays.includes(opt.days) && styles.recBtnActive]}
+                onPress={() => toggleReminder(opt.days)}
               >
-                <Text style={[styles.recBtnText, reminderDays === opt.days && styles.recBtnTextActive]}>
+                {reminderDays.includes(opt.days) && (
+                  <MaterialCommunityIcons name="check" size={13} color="#fff" />
+                )}
+                <Text style={[styles.recBtnText, reminderDays.includes(opt.days) && styles.recBtnTextActive]}>
                   {opt.label}
                 </Text>
               </TouchableOpacity>
@@ -584,9 +605,10 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   recTextActive: { color: '#fff', fontFamily: 'Poppins_500Medium' },
-  reminderRow: { flexDirection: 'row', gap: 8 },
+  reminderRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   recBtn: {
-    flex: 1, paddingVertical: 10,
+    minWidth: '30%', paddingVertical: 10, paddingHorizontal: 12,
+    flexDirection: 'row', gap: 5, justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: Colors.surface,
     borderRadius: BorderRadius.full,

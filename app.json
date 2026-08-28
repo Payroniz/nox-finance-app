@@ -2,7 +2,7 @@
   "expo": {
     "name": "NoX",
     "slug": "nox-finance",
-    "version": "2.0.0",
+    "version": "3.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -20,7 +20,12 @@
     },
     "android": {
       "package": "com.nox.finance",
-      "versionCode": 2,
+      "versionCode": 3,
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.RECEIVE_BOOT_COMPLETED"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1E1E2E"
@@ -30,6 +35,15 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.WRITE_EXTERNAL_STORAGE"
       ]
+    },
+    "androidStatusBar": {
+      "barStyle": "light-content",
+      "backgroundColor": "#1E1E2E",
+      "translucent": false
+    },
+    "androidNavigationBar": {
+      "barStyle": "light-content",
+      "backgroundColor": "#1A1A2E"
     },
     "web": {
       "favicon": "./assets/favicon.png",

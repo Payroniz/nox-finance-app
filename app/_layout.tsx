@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, AppState, AppStateStatus,
 } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Font from 'expo-font';
 import {
@@ -14,11 +14,12 @@ import {
 } from '@expo-google-fonts/poppins';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as LocalAuthentication from 'expo-local-authentication';
+import * as Notifications from 'expo-notifications';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { initializeDatabase, getSetting } from '../src/db/database';
-import { removeLegacySensitiveNotifications } from '../src/utils/notifications';
+import { migrateNotificationSchedulesIfNeeded, removeLegacySensitiveNotifications } from '../src/utils/notifications';
 import { migrateLegacyPin, verifyPin } from '../src/utils/security';
-import { cleanupTemporaryBackups } from '../src/utils/backups';
+import { cleanupTemporaryBackups, runAutomaticBackupIfDue } from '../src/utils/backups';
 import { Colors, Spacing, BorderRadius, FontSize } from '../src/constants/theme';
 
 SplashScreen.preventAutoHideAsync();
@@ -61,6 +62,10 @@ export default function RootLayout() {
           cleanupTemporaryBackups(),
           removeLegacySensitiveNotifications(),
         ]);
+        await Promise.allSettled([
+          runAutomaticBackupIfDue(),
+          migrateNotificationSchedulesIfNeeded(),
+        ]);
 
         const onboardingDone = await getSetting('onboardingCompleted');
         if (onboardingDone !== 'true') return;
@@ -84,6 +89,27 @@ export default function RootLayout() {
     }
     prepare();
   }, []);
+
+  useEffect(() => {
+    if (!appIsReady) return;
+
+    const openNotificationTarget = (response: Notifications.NotificationResponse) => {
+      const data = response.notification.request.content.data as Record<string, unknown>;
+      const id = typeof data.entityId === 'number' ? data.entityId : Number(data.entityId);
+      if (data.type === 'payment' && Number.isInteger(id)) router.push(`/payment/${id}`);
+      if (data.type === 'debt' && Number.isInteger(id)) router.push(`/debt/${id}`);
+      if (data.type === 'daily_summary') router.push('/(tabs)');
+    };
+
+    const subscription = Notifications.addNotificationResponseReceivedListener(openNotificationTarget);
+    Notifications.getLastNotificationResponseAsync().then(response => {
+      if (response) {
+        openNotificationTarget(response);
+        void Notifications.clearLastNotificationResponseAsync();
+      }
+    });
+    return () => subscription.remove();
+  }, [appIsReady]);
 
   useEffect(() => {
     const handleAppStateChange = async (nextState: AppStateStatus) => {
@@ -207,7 +233,7 @@ export default function RootLayout() {
 
   if (initializationError) {
     return (
-      <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayoutRootView}>
+      <GestureHandlerRootView style={{ flex: 1, backgroundColor: Colors.tabBar }} onLayout={onLayoutRootView}>
         <View style={lockStyles.overlay}>
           <View style={lockStyles.container}>
             <MaterialCommunityIcons name="shield-alert" size={56} color={Colors.danger} />
@@ -222,7 +248,7 @@ export default function RootLayout() {
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayoutRootView}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: Colors.tabBar }} onLayout={onLayoutRootView}>
       <Stack screenOptions={{ headerShown: false }}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="onboarding" options={{ headerShown: false, gestureEnabled: false }} />

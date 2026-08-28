@@ -4,6 +4,8 @@ export type PaymentStatus = 'pending' | 'paid' | 'overdue';
 export type DebtDirection = 'owe' | 'owed';
 export type IconType = 'gallery' | 'emoji' | 'icon';
 export type DebtStatus = 'ontime' | 'approaching' | 'overdue';
+export type BackupFrequency = 'daily' | 'weekly' | 'monthly';
+export type BackupDestination = 'device' | 'google-drive' | 'dropbox' | 'onedrive' | 'share';
 
 export interface Payment {
   id: number;
@@ -18,6 +20,7 @@ export interface Payment {
   recurrence: RecurrenceType;
   status: PaymentStatus;
   notes: string;
+  reminder_days: string;
   notification_id: string;
   created_at: string;
 }
@@ -33,6 +36,7 @@ export interface Debt {
   due_date: string;
   interest_rate: number;
   notes: string;
+  reminder_days: string;
   notification_ids: string; 
   created_at: string;
 }
@@ -64,12 +68,16 @@ export interface AppSettings {
   defaultCurrency: Currency;
   theme: 'dark' | 'light' | 'system';
   notificationsEnabled: boolean;
-  defaultReminderDays: number;
+  defaultReminderDays: number[];
   dailySummaryTime: string;
   pinEnabled: boolean;
   biometricEnabled: boolean;
   onboardingCompleted: boolean;
   autoLockMinutes: number;
+  automaticBackupEnabled: boolean;
+  backupFrequency: BackupFrequency;
+  backupDestination: BackupDestination;
+  lastBackupAt: string;
 }
 
 export interface MonthlyStats {
