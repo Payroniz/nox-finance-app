@@ -42,60 +42,60 @@ NoX Finance is an Expo application for tracking one-time or recurring payments, 
   <tr>
     <td align="center" width="33%">
       <img src="https://github.com/user-attachments/assets/6401fa65-4d04-4102-b994-8b98914faa9d" width="260" alt="Ana sayfa" />
-      <br><sub><b>Ana Sayfa</b></sub>
+      <br><sub><b>Main Home</b></sub>
     </td>
     <td align="center" width="33%">
       <img src="https://github.com/user-attachments/assets/1ade2721-b9d7-48e3-ab7c-c2c7d389ed68" width="260" alt="Ödemeler" />
-      <br><sub><b>Ödemeler</b></sub>
+      <br><sub><b>Payments</b></sub>
     </td>
     <td align="center" width="33%">
       <img src="https://github.com/user-attachments/assets/5c071825-4fdf-4c7b-a8df-0074da6bc46f" width="260" alt="İstatistikler" />
-      <br><sub><b>İstatistikler</b></sub>
+      <br><sub><b>Statistics</b></sub>
     </td>
   </tr>
 
   <tr>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/c99b5648-46ee-4334-988a-79c0e370da90" width="260" alt="Borçlar" />
-      <br><sub><b>Borçlar</b></sub>
+      <br><sub><b>Debts</b></sub>
     </td>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/ccbd4c87-7200-4f55-a767-b886341ca43b" width="260" alt="Finans planı" />
-      <br><sub><b>Finans Planı</b></sub>
+      <br><sub><b>Finance Plan</b></sub>
     </td>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/8d1b198b-cda2-447e-ac59-71b631189774" width="260" alt="Ödeme ekleme" />
-      <br><sub><b>Ödeme Ekleme</b></sub>
+      <br><sub><b>Add Payment</b></sub>
     </td>
   </tr>
 
   <tr>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/72a803b0-748c-41cf-86bd-173d862b290a" width="260" alt="Borç ekleme" />
-      <br><sub><b>Borç Ekleme</b></sub>
+      <br><sub><b>Add Debt</b></sub>
     </td>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/d2cdb4d7-abfd-42fd-b492-1cc01c1531c7" width="260" alt="Ayarlar" />
-      <br><sub><b>Ayarlar</b></sub>
+      <br><sub><b>Settings</b></sub>
     </td>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/7e40bf47-0346-49ed-a841-3f4673a6cca6" width="260" alt="Yedekleme" />
-      <br><sub><b>Yedekleme</b></sub>
+      <br><sub><b>Backup</b></sub>
     </td>
   </tr>
 
   <tr>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/51a2bc5a-3ce1-4df1-8e51-61e24a572774" width="260" alt="Bildirim ayarları" />
-      <br><sub><b>Bildirim Ayarları</b></sub>
+      <br><sub><b>Notification Settings</b></sub>
     </td>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/f3888f14-fa8f-4bc0-a0b5-67b704a1278f" width="260" alt="İkon seçimi" />
-      <br><sub><b>İkon Seçimi</b></sub>
+      <br><sub><b>Icon Selection</b></sub>
     </td>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/60718b8f-a146-436d-bac9-9248cb42bcc2" width="260" alt="Hatırlatıcılar" />
-      <br><sub><b>Hatırlatıcılar</b></sub>
+      <br><sub><b>Reminders</b></sub>
     </td>
   </tr>
 </table>
