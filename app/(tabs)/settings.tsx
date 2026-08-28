@@ -10,7 +10,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { Colors, Spacing, BorderRadius, FontSize } from '../../src/constants/theme';
 import { Card } from '../../src/components/Card';
-import { deleteAllData, getAllSettings, setSetting } from '../../src/db/database';
+import { addUploadedIcon, deleteAllData, deleteUploadedIcon, getAllSettings, getUploadedIcons, setSetting } from '../../src/db/database';
 import {
   cancelAllNotifications,
   canScheduleNotifications,
@@ -26,16 +26,20 @@ import {
   setSecurePin,
 } from '../../src/utils/security';
 import {
+  BackupEntry,
   cleanupTemporaryBackups,
+  configureBackupDestination,
   createAutomaticBackup,
   getAutomaticBackupCount,
-  restoreLatestAutomaticBackup,
-  restoreLatestFromSelectedFolder,
-  saveBackupToSelectedFolder,
+  listAutomaticBackups,
+  restoreAutomaticBackup,
+  restoreBackupFromPicker,
+  saveBackupToConfiguredDestination,
   shareBackup,
 } from '../../src/utils/backups';
-import { AppSettings, BackupDestination, BackupFrequency, Currency } from '../../src/constants/types';
+import { AppSettings, BackupDestination, BackupFrequency, Currency, UploadedIcon } from '../../src/constants/types';
 import { SelectionSheet } from '../../src/components/SelectionSheet';
+import { clearManagedMedia, persistMediaFile } from '../../src/utils/media';
 
 
 type SettingRowProps = {
@@ -76,6 +80,10 @@ export default function SettingsScreen() {
   const [notificationDiagnostics, setNotificationDiagnostics] = useState({ permission: 'undetermined', scheduledCount: 0 });
   const [automaticBackupCount, setAutomaticBackupCount] = useState(0);
   const [backupBusy, setBackupBusy] = useState(false);
+  const [uploadedIcons, setUploadedIcons] = useState<UploadedIcon[]>([]);
+  const [showUploadedIcons, setShowUploadedIcons] = useState(false);
+  const [showBackupHistory, setShowBackupHistory] = useState(false);
+  const [backupEntries, setBackupEntries] = useState<BackupEntry[]>([]);
 
   useFocusEffect(useCallback(() => { loadSettings(); }, []));
 
@@ -85,12 +93,14 @@ export default function SettingsScreen() {
       await setSetting('notificationsEnabled', 'false');
       s.notificationsEnabled = false;
     }
-    const [diagnostics, backupCount] = await Promise.all([
+    const [diagnostics, backupCount, icons] = await Promise.all([
       getNotificationDiagnostics().catch(() => ({ permission: 'undetermined', scheduledCount: 0 })),
       getAutomaticBackupCount().catch(() => 0),
+      getUploadedIcons().catch(() => []),
     ]);
     setNotificationDiagnostics(diagnostics);
     setAutomaticBackupCount(backupCount);
+    setUploadedIcons(icons);
     setSettings(s);
   };
 
@@ -107,7 +117,28 @@ export default function SettingsScreen() {
       quality: 0.8,
     });
     if (!result.canceled) {
-      await updateSetting('profilePhoto', result.assets[0].uri);
+      const uri = await persistMediaFile(result.assets[0].uri, 'avatar');
+      await updateSetting('profilePhoto', uri);
+    }
+  };
+
+  const handleUploadIcon = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: 'images',
+      allowsMultipleSelection: true,
+      quality: 0.85,
+    });
+    if (result.canceled) return;
+    setBackupBusy(true);
+    try {
+      for (const [index, asset] of result.assets.entries()) {
+        const uri = await persistMediaFile(asset.uri, 'icon');
+        await addUploadedIcon(uri, asset.fileName || `İkon ${uploadedIcons.length + index + 1}`);
+      }
+      await loadSettings();
+      Alert.alert('İkonlar Hazır', `${result.assets.length} ikon kütüphaneye eklendi.`);
+    } finally {
+      setBackupBusy(false);
     }
   };
 
@@ -252,16 +283,21 @@ export default function SettingsScreen() {
     if (!settings) return;
     setBackupBusy(true);
     try {
-      if (settings.backupDestination === 'device' && Platform.OS === 'android') {
-        await saveBackupToSelectedFolder();
-      } else {
-        await shareBackup();
+      if (Platform.OS === 'android') {
+        if (settings.backupDestination !== 'share' && !settings.backupDirectoryUri) {
+          await configureBackupDestination(settings.backupDestination, BACKUP_DESTINATION_LABELS[settings.backupDestination]);
+        }
+        await saveBackupToConfiguredDestination();
       }
+      else await shareBackup();
       await loadSettings();
       Alert.alert('Yedek Hazır', 'Yedek dosyası seçtiğiniz hedefe gönderildi.');
     } catch (e) {
-      if ((e as Error).message !== 'DIRECTORY_PERMISSION_DENIED') {
-        Alert.alert('Yedeklenemedi', 'Yedek hedefi açılamadı veya dosya kaydedilemedi.');
+      const message = (e as Error).message;
+      if (message !== 'DIRECTORY_PERMISSION_DENIED') {
+        Alert.alert('Yedeklenemedi', message === 'DESTINATION_NOT_CONFIGURED'
+          ? 'Bir kayıt klasörü seçin veya “Diğer Uygulamalar” hedefini kullanın.'
+          : 'Yedek hedefi açılamadı veya dosya kaydedilemedi.');
       }
     } finally {
       setBackupBusy(false);
@@ -280,16 +316,68 @@ export default function SettingsScreen() {
   };
 
   const handleAutomaticBackupToggle = async (value: boolean) => {
-    await updateSetting('automaticBackupEnabled', value);
     if (!value) return;
+    if (!settings?.backupDirectoryUri && Platform.OS === 'android') {
+      try {
+        await configureBackupDestination('device', 'Cihaz / Klasör');
+      } catch {
+        Alert.alert('Klasör Seçilmedi', 'Otomatik yedeklemeyi açmak için kayıt klasörünü seçmelisiniz.');
+        return;
+      }
+    }
+    await updateSetting('automaticBackupEnabled', value);
     setBackupBusy(true);
     try {
       await createAutomaticBackup();
       await loadSettings();
-      Alert.alert('Otomatik Yedekleme Açıldı', 'Güvenli yerel yedek oluşturuldu; en yeni 5 kopya saklanacak.');
+      Alert.alert('Otomatik Yedekleme Açıldı', 'İlk yedek seçtiğiniz klasöre oluşturuldu; en yeni 5 kopya saklanacak.');
     } catch {
       await updateSetting('automaticBackupEnabled', false);
       Alert.alert('Yedekleme Açılamadı', 'Cihaz depolama alanı kullanılamıyor.');
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const handleAutomaticBackupSwitch = async (value: boolean) => {
+    if (!value) {
+      await updateSetting('automaticBackupEnabled', false);
+      return;
+    }
+    await handleAutomaticBackupToggle(true);
+  };
+
+  const handleBackupDestination = async (destination: BackupDestination) => {
+    const label = BACKUP_DESTINATION_LABELS[destination];
+    setBackupBusy(true);
+    try {
+      await configureBackupDestination(destination, label);
+      await loadSettings();
+      if (destination !== 'share') {
+        Alert.alert(
+          'Kayıt Yeri Bağlandı',
+          `${label} için seçtiğiniz hesap/klasör kullanılacak. Sistem ekranında Drive, Dropbox veya OneDrive sağlayıcısından hesap ve klasörü siz belirleyebilirsiniz.`
+        );
+      }
+    } catch (e) {
+      if ((e as Error).message === 'DIRECTORY_PERMISSION_DENIED') {
+        Alert.alert('Hedef Değişmedi', 'Hesap veya klasör seçimi tamamlanmadı.');
+      } else {
+        Alert.alert('Hedef Bağlanamadı', 'Dosya sağlayıcısı veya seçilen klasör açılamadı.');
+      }
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const openBackupHistory = async () => {
+    setBackupBusy(true);
+    try {
+      const entries = await listAutomaticBackups();
+      setBackupEntries(entries);
+      setShowBackupHistory(true);
+    } catch {
+      Alert.alert('Yedekler Okunamadı', 'Seçilen klasöre erişim iznini yenileyin.');
     } finally {
       setBackupBusy(false);
     }
@@ -304,7 +392,7 @@ export default function SettingsScreen() {
       Alert.alert('Geri Yükleme Tamamlandı', `${fileName} yedeği başarıyla geri yüklendi.`);
     } catch (e) {
       const message = (e as Error).message;
-      if (message !== 'DIRECTORY_PERMISSION_DENIED') {
+      if (!['DIRECTORY_PERMISSION_DENIED', 'PICKER_CANCELLED'].includes(message)) {
         Alert.alert('Geri Yüklenemedi', message === 'BACKUP_NOT_FOUND'
           ? 'Seçilen konumda NoX JSON yedeği bulunamadı.'
           : 'Yedek dosyası geçersiz veya okunamıyor.');
@@ -349,6 +437,7 @@ export default function SettingsScreen() {
       await deleteAllData();
       await deleteSecurePin();
       await cleanupTemporaryBackups();
+      await clearManagedMedia();
       await loadSettings();
       Alert.alert('Tamamlandı', 'Tüm uygulama verileri, PIN ve geçici yedekler silindi.');
     } catch (error) {
@@ -512,74 +601,79 @@ export default function SettingsScreen() {
           )}
         </Card>
 
+        <Text style={styles.sectionLabel}>İKON KÜTÜPHANESİ</Text>
+        <Card style={styles.settingCard}>
+          <SettingRow icon="image-plus-outline" label="İkon Yükle" onPress={backupBusy ? undefined : handleUploadIcon}>
+            <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.textMuted} />
+          </SettingRow>
+          <View style={styles.divider} />
+          <SettingRow icon="image-multiple-outline" label={`Yüklü İkonlar (${uploadedIcons.length})`} onPress={() => setShowUploadedIcons(true)}>
+            <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.textMuted} />
+          </SettingRow>
+        </Card>
+
         {/* Veri */}
         <Text style={styles.sectionLabel}>VERİ YÖNETİMİ</Text>
         <Card style={styles.settingCard}>
           <SettingRow icon="cloud-sync-outline" label="Otomatik Yedekleme">
             <Switch
               value={settings.automaticBackupEnabled}
-              onValueChange={handleAutomaticBackupToggle}
+              onValueChange={handleAutomaticBackupSwitch}
               disabled={backupBusy}
               trackColor={{ false: Colors.surfaceBorder, true: Colors.primary }}
               thumbColor="#fff"
             />
           </SettingRow>
-          <View style={styles.divider} />
-          <SettingRow icon="calendar-sync" label="Yedek Sıklığı" onPress={() => setActiveSheet('backupFrequency')}>
-            <View style={styles.settingValueRow}>
-              <Text style={styles.settingValue}>{BACKUP_FREQUENCY_LABELS[settings.backupFrequency]}</Text>
-              <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.textMuted} />
-            </View>
-          </SettingRow>
-          <View style={styles.divider} />
-          <SettingRow icon="cloud-outline" label="Yedekleme Aracı" onPress={() => setActiveSheet('backupDestination')}>
-            <View style={styles.settingValueRow}>
-              <Text style={styles.settingValue}>{BACKUP_DESTINATION_LABELS[settings.backupDestination]}</Text>
-              <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.textMuted} />
-            </View>
-          </SettingRow>
+          {settings.automaticBackupEnabled ? (
+            <>
+              <View style={styles.divider} />
+              <SettingRow icon="calendar-sync" label="Yedek Sıklığı" onPress={() => setActiveSheet('backupFrequency')}>
+                <View style={styles.settingValueRow}>
+                  <Text style={styles.settingValue}>{BACKUP_FREQUENCY_LABELS[settings.backupFrequency]}</Text>
+                  <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.textMuted} />
+                </View>
+              </SettingRow>
+              <View style={styles.divider} />
+              <SettingRow icon="cloud-outline" label="Yedekleme Aracı" onPress={() => setActiveSheet('backupDestination')}>
+                <View style={[styles.settingValueRow, { maxWidth: '55%' }]}>
+                  <Text style={styles.settingValue} numberOfLines={1}>
+                    {settings.backupDirectoryLabel || BACKUP_DESTINATION_LABELS[settings.backupDestination]}
+                  </Text>
+                  <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.textMuted} />
+                </View>
+              </SettingRow>
+              {automaticBackupCount > 0 ? (
+                <>
+                  <View style={styles.divider} />
+                  <SettingRow icon="history" label="Otomatik Yedekler" onPress={backupBusy ? undefined : openBackupHistory}>
+                    <View style={styles.settingValueRow}>
+                      <Text style={styles.settingValue}>{automaticBackupCount} yedek</Text>
+                      <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.textMuted} />
+                    </View>
+                  </SettingRow>
+                </>
+              ) : null}
+            </>
+          ) : null}
           <View style={styles.divider} />
           <SettingRow icon="backup-restore" label={backupBusy ? 'İşlem Sürüyor...' : 'Şimdi Yedekle'} onPress={backupBusy ? undefined : handleExport}>
             <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.textMuted} />
           </SettingRow>
-          {Platform.OS === 'android' ? (
-            <>
-              <View style={styles.divider} />
-              <SettingRow
-                icon="folder-upload-outline"
-                label="Klasörden Geri Yükle"
-                onPress={backupBusy ? undefined : () => Alert.alert(
-                  'Yedeği Geri Yükle',
-                  'Mevcut finans kayıtları seçilen klasördeki en yeni NoX yedeğiyle değiştirilecek.',
-                  [
-                    { text: 'İptal', style: 'cancel' },
-                    { text: 'Devam Et', onPress: () => void finishRestore(restoreLatestFromSelectedFolder) },
-                  ]
-                )}
-              >
-                <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.textMuted} />
-              </SettingRow>
-            </>
-          ) : null}
-          {automaticBackupCount > 0 ? (
-            <>
-              <View style={styles.divider} />
-              <SettingRow
-                icon="history"
-                label={`Son Otomatik Yedeği Geri Yükle (${automaticBackupCount})`}
-                onPress={backupBusy ? undefined : () => Alert.alert(
-                  'Otomatik Yedeği Geri Yükle',
-                  'Mevcut finans kayıtları en yeni otomatik yedekle değiştirilecek.',
-                  [
-                    { text: 'İptal', style: 'cancel' },
-                    { text: 'Geri Yükle', onPress: () => void finishRestore(restoreLatestAutomaticBackup) },
-                  ]
-                )}
-              >
-                <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.textMuted} />
-              </SettingRow>
-            </>
-          ) : null}
+          <View style={styles.divider} />
+          <SettingRow
+            icon="file-restore-outline"
+            label="Yedeği Geri Yükle"
+            onPress={backupBusy ? undefined : () => Alert.alert(
+              'Yedeği Geri Yükle',
+              'Seçeceğiniz NoX JSON yedeği mevcut finans kayıtlarının yerini alacak. Profil fotoğrafı ve ikonlar da geri getirilecek.',
+              [
+                { text: 'İptal', style: 'cancel' },
+                { text: 'Dosya Seç', onPress: () => void finishRestore(restoreBackupFromPicker) },
+              ]
+            )}
+          >
+            <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.textMuted} />
+          </SettingRow>
           <View style={styles.divider} />
           <SettingRow
             icon="delete-alert"
@@ -612,7 +706,7 @@ export default function SettingsScreen() {
         <Text style={styles.sectionLabel}>HAKKINDA</Text>
         <Card style={styles.settingCard}>
           <SettingRow icon="information" label="NoX Finance">
-            <Text style={styles.settingValue}>v3.0.0</Text>
+            <Text style={styles.settingValue}>v3.1.7</Text>
           </SettingRow>
         </Card>
 
@@ -699,6 +793,92 @@ export default function SettingsScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      <Modal visible={showUploadedIcons} transparent animationType="slide" onRequestClose={() => setShowUploadedIcons(false)}>
+        <View style={styles.bottomOverlay}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowUploadedIcons(false)} />
+          <View style={styles.librarySheet}>
+            <View style={styles.sheetHandle} />
+            <View style={styles.libraryHeader}>
+              <View>
+                <Text style={styles.libraryTitle}>Yüklü İkonlar</Text>
+                <Text style={styles.librarySubtitle}>Ödeme ve borçlarda tek dokunuşla kullanabilirsiniz.</Text>
+              </View>
+              <TouchableOpacity style={styles.sheetClose} onPress={() => setShowUploadedIcons(false)}>
+                <MaterialCommunityIcons name="close" size={21} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            {uploadedIcons.length ? (
+              <ScrollView contentContainerStyle={styles.iconLibraryGrid} showsVerticalScrollIndicator={false}>
+                {uploadedIcons.map(icon => (
+                  <View key={icon.id} style={styles.libraryIconCard}>
+                    <Image source={{ uri: icon.uri }} style={styles.libraryIconImage} />
+                    <TouchableOpacity
+                      style={styles.libraryDelete}
+                      onPress={() => Alert.alert('İkonu Kaldır', 'İkon kütüphaneden kaldırılsın mı? Mevcut kayıtlarda kullanılmaya devam eder.', [
+                        { text: 'İptal', style: 'cancel' },
+                        { text: 'Kaldır', style: 'destructive', onPress: async () => { await deleteUploadedIcon(icon.id); await loadSettings(); } },
+                      ])}
+                    >
+                      <MaterialCommunityIcons name="close" size={14} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </ScrollView>
+            ) : (
+              <View style={styles.emptyLibrary}>
+                <MaterialCommunityIcons name="image-multiple-outline" size={48} color={Colors.textMuted} />
+                <Text style={styles.emptyLibraryTitle}>Henüz ikon yüklenmedi</Text>
+                <TouchableOpacity style={styles.nameSaveBtn} onPress={() => { setShowUploadedIcons(false); void handleUploadIcon(); }}>
+                  <Text style={styles.nameSaveText}>İlk İkonu Yükle</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={showBackupHistory} transparent animationType="slide" onRequestClose={() => setShowBackupHistory(false)}>
+        <View style={styles.bottomOverlay}>
+          <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={() => setShowBackupHistory(false)} />
+          <View style={styles.librarySheet}>
+            <View style={styles.sheetHandle} />
+            <View style={styles.libraryHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.libraryTitle}>Otomatik Yedekler</Text>
+                <Text style={styles.librarySubtitle}>Geri yüklemek istediğiniz kopyayı tarihine göre seçin.</Text>
+              </View>
+              <TouchableOpacity style={styles.sheetClose} onPress={() => setShowBackupHistory(false)}>
+                <MaterialCommunityIcons name="close" size={21} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={{ gap: Spacing.sm }} showsVerticalScrollIndicator={false}>
+              {backupEntries.map((entry, index) => {
+                const date = entry.createdAt ? new Date(entry.createdAt) : null;
+                return (
+                  <TouchableOpacity
+                    key={entry.uri}
+                    style={styles.backupEntry}
+                    onPress={() => Alert.alert('Bu Yedeği Geri Yükle', `${date && !Number.isNaN(date.getTime()) ? date.toLocaleString('tr-TR') : entry.name} tarihli yedek geri yüklensin mi?`, [
+                      { text: 'İptal', style: 'cancel' },
+                      { text: 'Geri Yükle', onPress: () => { setShowBackupHistory(false); void finishRestore(() => restoreAutomaticBackup(entry)); } },
+                    ])}
+                  >
+                    <View style={styles.backupEntryIcon}>
+                      <MaterialCommunityIcons name={index === 0 ? 'shield-star-outline' : 'backup-restore'} size={22} color={Colors.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.backupEntryTitle}>{date && !Number.isNaN(date.getTime()) ? date.toLocaleString('tr-TR') : entry.name}</Text>
+                      <Text style={styles.backupEntrySubtitle}>{entry.location}{index === 0 ? ' • En yeni' : ''}</Text>
+                    </View>
+                    <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.textMuted} />
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       <SelectionSheet
         visible={activeSheet === 'currency'}
         title="Para Birimi"
@@ -778,7 +958,7 @@ export default function SettingsScreen() {
         ]}
         selectedValues={[settings.backupDestination]}
         onClose={() => setActiveSheet(null)}
-        onConfirm={values => updateSetting('backupDestination', values[0] as BackupDestination)}
+        onConfirm={values => handleBackupDestination(values[0] as BackupDestination)}
       />
 
       {/* Günlük özet saati picker */}
@@ -882,4 +1062,26 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
   },
   nameSaveText: { fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: '#fff' },
+  bottomOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(8,8,18,0.72)' },
+  librarySheet: {
+    maxHeight: '78%', minHeight: 310, backgroundColor: Colors.surface,
+    borderTopLeftRadius: 30, borderTopRightRadius: 30,
+    paddingHorizontal: Spacing.lg, paddingTop: Spacing.sm, paddingBottom: Spacing.xxl,
+    borderWidth: 1, borderBottomWidth: 0, borderColor: Colors.surfaceBorder,
+  },
+  sheetHandle: { width: 42, height: 4, borderRadius: 2, backgroundColor: Colors.surfaceBorder, alignSelf: 'center', marginBottom: Spacing.lg },
+  libraryHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.md, marginBottom: Spacing.lg },
+  libraryTitle: { fontFamily: 'Poppins_700Bold', fontSize: FontSize.xl, color: Colors.textPrimary },
+  librarySubtitle: { fontFamily: 'Poppins_400Regular', fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
+  sheetClose: { width: 38, height: 38, borderRadius: 19, backgroundColor: Colors.surfaceLight, alignItems: 'center', justifyContent: 'center' },
+  iconLibraryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.md, paddingBottom: Spacing.lg },
+  libraryIconCard: { width: '21%', aspectRatio: 1, borderRadius: BorderRadius.lg, backgroundColor: Colors.surfaceLight, padding: 7, position: 'relative' },
+  libraryIconImage: { width: '100%', height: '100%', borderRadius: BorderRadius.md },
+  libraryDelete: { position: 'absolute', right: -5, top: -5, width: 22, height: 22, borderRadius: 11, backgroundColor: Colors.danger, alignItems: 'center', justifyContent: 'center' },
+  emptyLibrary: { alignItems: 'center', justifyContent: 'center', gap: Spacing.md, paddingVertical: Spacing.xxl },
+  emptyLibraryTitle: { fontFamily: 'Poppins_500Medium', fontSize: FontSize.md, color: Colors.textSecondary },
+  backupEntry: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, padding: Spacing.md, backgroundColor: Colors.surfaceLight, borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: Colors.surfaceBorder },
+  backupEntryIcon: { width: 44, height: 44, borderRadius: BorderRadius.md, backgroundColor: `${Colors.primary}18`, alignItems: 'center', justifyContent: 'center' },
+  backupEntryTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: FontSize.sm, color: Colors.textPrimary },
+  backupEntrySubtitle: { fontFamily: 'Poppins_400Regular', fontSize: FontSize.xs, color: Colors.textMuted, marginTop: 2 },
 });

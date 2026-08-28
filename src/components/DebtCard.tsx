@@ -30,8 +30,12 @@ export const DebtCard: React.FC<DebtCardProps> = ({ debt, onPress }) => {
         <View style={styles.header}>
           <View style={styles.personInfo}>
             <View style={[styles.avatar, { backgroundColor: `${statusColor}25` }]}>
-              {debt.person_photo ? (
-                <Image source={{ uri: debt.person_photo }} style={styles.avatarImage} />
+              {debt.icon_type === 'gallery' && debt.icon_value ? (
+                <Image source={{ uri: debt.icon_value }} style={styles.avatarImage} />
+              ) : debt.icon_type === 'emoji' ? (
+                <Text style={styles.avatarEmoji}>{debt.icon_value}</Text>
+              ) : debt.icon_value ? (
+                <MaterialCommunityIcons name={debt.icon_value as any} size={23} color={statusColor} />
               ) : (
                 <Text style={styles.avatarText}>
                   {debt.person_name.charAt(0).toUpperCase()}

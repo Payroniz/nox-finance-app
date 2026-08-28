@@ -10,15 +10,16 @@ import * as Haptics from 'expo-haptics';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { Colors, Spacing, BorderRadius, FontSize, Shadow } from '../../src/constants/theme';
 import {
-  getDebtById, deleteDebt, addDebtPayment, getDebtPayments, updateDebt,
+  getDebtById, deleteDebt, addDebtPayment, getDebtPayments, updateDebt, addUploadedIcon, getUploadedIcons,
 } from '../../src/db/database';
 import { cancelMultipleNotifications, parseNotificationIds, parseReminderDays, scheduleDebtNotification } from '../../src/utils/notifications';
 import {
   formatCurrency, formatDate, getDueDateLabel, determineDebtStatus, getDebtStatusColor,
   formatLocalDateKey, parseLocalDate,
 } from '../../src/utils/helpers';
-import { Debt, DebtPayment, Currency, DebtDirection } from '../../src/constants/types';
+import { Debt, DebtPayment, Currency, DebtDirection, UploadedIcon } from '../../src/constants/types';
 import { CurrencyInput } from '../../src/components/CurrencyInput';
+import { persistMediaFile } from '../../src/utils/media';
 
 const QUICK_ICONS = [
   'cash', 'credit-card', 'bank', 'wallet', 'currency-usd', 'piggy-bank',
@@ -81,18 +82,21 @@ export default function DebtDetailScreen() {
   const [showEditIconPicker, setShowEditIconPicker] = useState(false);
   const [editIconType, setEditIconType] = useState<'icon' | 'emoji' | 'gallery'>('gallery');
   const [editIconValue, setEditIconValue] = useState('');
-  const [activeEditIconTab, setActiveEditIconTab] = useState<'icon' | 'emoji'>('icon');
+  const [activeEditIconTab, setActiveEditIconTab] = useState<'icon' | 'library' | 'emoji'>('icon');
   const [editEmojiInput, setEditEmojiInput] = useState('');
+  const [uploadedIcons, setUploadedIcons] = useState<UploadedIcon[]>([]);
 
   useFocusEffect(useCallback(() => { loadData(); }, [id]));
 
   const loadData = async () => {
-    const [d, p] = await Promise.all([
+    const [d, p, icons] = await Promise.all([
       getDebtById(parseInt(id)),
       getDebtPayments(parseInt(id)),
+      getUploadedIcons(),
     ]);
     setDebt(d);
     setPayments(p);
+    setUploadedIcons(icons);
   };
 
   const openEdit = () => {
@@ -108,8 +112,8 @@ export default function DebtDetailScreen() {
     setEditReminderDays(parseReminderDays(debt.reminder_days, [1, 3, 7]));
     setEditNotes(debt.notes);
     setEditPersonPhoto(debt.person_photo || '');
-    setEditIconType((debt.person_photo ? 'gallery' : 'icon') as any);
-    setEditIconValue(debt.person_photo || '');
+    setEditIconType(debt.icon_type || (debt.person_photo ? 'gallery' : 'icon'));
+    setEditIconValue(debt.icon_value || debt.person_photo || 'account-cash');
     setIsEditing(true);
   };
 
@@ -121,11 +125,13 @@ export default function DebtDetailScreen() {
       quality: 0.7,
     });
     if (!result.canceled && result.assets[0]) {
-      const uri = result.assets[0].uri;
+      const uri = await persistMediaFile(result.assets[0].uri, 'icon');
+      await addUploadedIcon(uri, result.assets[0].fileName || editPersonName || 'Borç ikonu');
       setEditIconType('gallery');
       setEditIconValue(uri);
       setEditPersonPhoto(uri);
       setShowEditIconPicker(false);
+      setUploadedIcons(await getUploadedIcons());
     }
   };
 
@@ -187,6 +193,8 @@ export default function DebtDetailScreen() {
       await updateDebt(debt.id, {
         person_name: editPersonName.trim(),
         person_photo: editPersonPhoto,
+        icon_type: editIconType,
+        icon_value: editIconValue,
         total_amount: parsedAmount,
         currency: editCurrency,
         debt_direction: editDirection,
@@ -452,6 +460,12 @@ export default function DebtDetailScreen() {
                   <Text style={[styles.iconTabText, activeEditIconTab === 'icon' && styles.iconTabTextActive]}>İkonlar</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
+                  style={[styles.iconTab, activeEditIconTab === 'library' && styles.iconTabActive]}
+                  onPress={() => setActiveEditIconTab('library')}
+                >
+                  <Text style={[styles.iconTabText, activeEditIconTab === 'library' && styles.iconTabTextActive]}>Yüklü</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
                   style={[styles.iconTab, activeEditIconTab === 'emoji' && styles.iconTabActive]}
                   onPress={() => setActiveEditIconTab('emoji')}
                 >
@@ -483,6 +497,18 @@ export default function DebtDetailScreen() {
                       </TouchableOpacity>
                     ))}
                   </View>
+                </ScrollView>
+              ) : activeEditIconTab === 'library' ? (
+                <ScrollView contentContainerStyle={styles.uploadedGrid} showsVerticalScrollIndicator={false}>
+                  {uploadedIcons.length ? uploadedIcons.map(icon => (
+                    <TouchableOpacity
+                      key={icon.id}
+                      style={[styles.uploadedOption, editIconType === 'gallery' && editIconValue === icon.uri && styles.iconOptionActive]}
+                      onPress={() => { setEditIconType('gallery'); setEditIconValue(icon.uri); setEditPersonPhoto(icon.uri); setShowEditIconPicker(false); }}
+                    >
+                      <Image source={{ uri: icon.uri }} style={styles.uploadedImage} />
+                    </TouchableOpacity>
+                  )) : <Text style={styles.emojiHint}>Ayarlar’dan ikon yükleyin veya Galeri’yi kullanın.</Text>}
                 </ScrollView>
               ) : (
                 <View style={styles.emojiInputSection}>
@@ -529,8 +555,12 @@ export default function DebtDetailScreen() {
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.heroCard}>
           <View style={styles.avatarContainer}>
-            {debt.person_photo ? (
-              <Image source={{ uri: debt.person_photo }} style={styles.avatar} />
+            {debt.icon_type === 'gallery' && debt.icon_value ? (
+              <Image source={{ uri: debt.icon_value }} style={styles.avatar} />
+            ) : debt.icon_type === 'emoji' ? (
+              <View style={[styles.avatarPlaceholder, { backgroundColor: `${directionColor}20` }]}><Text style={{ fontSize: 34 }}>{debt.icon_value}</Text></View>
+            ) : debt.icon_value ? (
+              <View style={[styles.avatarPlaceholder, { backgroundColor: `${directionColor}20` }]}><MaterialCommunityIcons name={debt.icon_value as any} size={34} color={directionColor} /></View>
             ) : (
               <View style={[styles.avatarPlaceholder, { backgroundColor: `${directionColor}20` }]}>
                 <Text style={[styles.avatarInitial, { color: directionColor }]}>{debt.person_name.charAt(0).toUpperCase()}</Text>
@@ -846,6 +876,9 @@ const styles = StyleSheet.create({
   iconGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   iconOption: { width: 58, height: 58, borderRadius: BorderRadius.md, backgroundColor: Colors.surfaceLight, alignItems: 'center', justifyContent: 'center' },
   iconOptionActive: { backgroundColor: Colors.primary },
+  uploadedGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingBottom: Spacing.lg },
+  uploadedOption: { width: 66, height: 66, borderRadius: BorderRadius.lg, padding: 5, backgroundColor: Colors.surfaceLight },
+  uploadedImage: { width: '100%', height: '100%', borderRadius: BorderRadius.md },
   emojiInputSection: { alignItems: 'center', paddingVertical: 8 },
   emojiHint: { fontFamily: 'Poppins_400Regular', fontSize: FontSize.sm, color: Colors.textSecondary },
   emojiTextInput: { fontSize: 36, textAlign: 'center', color: Colors.textPrimary, backgroundColor: Colors.surfaceLight, borderRadius: BorderRadius.md, padding: 16, marginVertical: 12, width: '100%' },

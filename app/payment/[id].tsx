@@ -9,42 +9,34 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { Colors, Spacing, BorderRadius, FontSize, Shadow } from '../../src/constants/theme';
-import { getPayments, updatePaymentStatus, updatePayment, deletePayment, getCategories } from '../../src/db/database';
+import { addUploadedIcon, getPayments, updatePaymentStatus, updatePayment, deletePayment, getCategories, getUploadedIcons } from '../../src/db/database';
 import { cancelNotification, parseNotificationIds, parseReminderDays, schedulePaymentNotification } from '../../src/utils/notifications';
 import {
   formatCurrency, formatDateWithTime, getStatusColor,
   getStatusLabel, getStatusIcon, getRecurrenceLabel, getDueDateLabel,
   formatLocalDateKey, parseLocalDate,
 } from '../../src/utils/helpers';
-import { Payment, Currency, RecurrenceType, IconType } from '../../src/constants/types';
+import { Payment, Currency, RecurrenceType, IconType, UploadedIcon } from '../../src/constants/types';
 import { CurrencyInput } from '../../src/components/CurrencyInput';
+import { persistMediaFile } from '../../src/utils/media';
 
 const QUICK_ICONS = [
-  //Para & Finans
   'cash', 'credit-card', 'bank', 'wallet', 'currency-usd', 'piggy-bank',
   'receipt', 'invoice-text', 'finance', 'trending-up', 'trending-down', 'chart-line',
-  //Ev & Yaşam
   'home', 'home-city', 'sofa', 'bed', 'shower', 'flash',
   'water', 'fire', 'hvac', 'washing-machine', 'fridge', 'television',
-  //Ulaşım
   'car', 'car-wash', 'gas-station', 'airplane', 'train', 'bus',
   'motorbike', 'bicycle', 'taxi', 'ferry', 'parking', 'road',
-  //Teknoloji & İletişim
   'phone', 'wifi', 'cellphone', 'laptop', 'tablet', 'monitor',
   'printer', 'headphones', 'camera', 'router-wireless', 'cloud', 'server',
-  //Sağlık & Spor
   'medical-bag', 'hospital-box', 'heart-pulse', 'pill', 'tooth', 'eye',
   'dumbbell', 'yoga', 'run', 'swim', 'soccer', 'basketball',
-  //Yiyecek & İçecek
   'food', 'coffee', 'food-fork-drink', 'pizza', 'hamburger', 'cake',
   'fruit-watermelon', 'cup', 'bottle-wine', 'grocery', 'silverware', 'chef-hat',
-  //Eğitim & Kültür
   'school', 'book', 'bookshelf', 'pencil', 'graduation-cap', 'library',
   'music', 'music-note', 'theater', 'palette', 'film', 'gamepad',
-  //Alışveriş & Hizmet
   'cart', 'store', 'tag', 'gift', 'hanger', 'shoe-heel',
   'scissors', 'hammer', 'tools', 'broom', 'face-woman', 'baby-carriage',
-  //Diğer
   'star', 'heart', 'flower', 'leaf', 'paw', 'earth',
   'shield', 'lock', 'key', 'bell', 'alarm', 'calendar',
 ];
@@ -88,12 +80,14 @@ export default function PaymentDetailScreen() {
   const [editIconValue, setEditIconValue] = useState('credit-card');
   const [saving, setSaving] = useState(false);
   const [showEditIconPicker, setShowEditIconPicker] = useState(false);
-  const [activeEditIconTab, setActiveEditIconTab] = useState<'icon' | 'emoji'>('icon');
+  const [activeEditIconTab, setActiveEditIconTab] = useState<'icon' | 'library' | 'emoji'>('icon');
   const [editEmojiInput, setEditEmojiInput] = useState('');
+  const [uploadedIcons, setUploadedIcons] = useState<UploadedIcon[]>([]);
 
   useFocusEffect(useCallback(() => {
     loadPayment();
     getCategories().then(setCategories);
+    getUploadedIcons().then(setUploadedIcons);
   }, [id]));
 
   const loadPayment = async () => {
@@ -169,8 +163,11 @@ export default function PaymentDetailScreen() {
       quality: 0.7,
     });
     if (!result.canceled && result.assets[0]) {
+      const uri = await persistMediaFile(result.assets[0].uri, 'icon');
+      await addUploadedIcon(uri, result.assets[0].fileName || editName || 'Ödeme ikonu');
       setEditIconType('gallery');
-      setEditIconValue(result.assets[0].uri);
+      setEditIconValue(uri);
+      setUploadedIcons(await getUploadedIcons());
       setShowEditIconPicker(false);
     }
   };
@@ -369,6 +366,12 @@ export default function PaymentDetailScreen() {
                   <Text style={[styles.iconTabText, activeEditIconTab === 'icon' && styles.iconTabTextActive]}>İkonlar</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
+                  style={[styles.iconTab, activeEditIconTab === 'library' && styles.iconTabActive]}
+                  onPress={() => setActiveEditIconTab('library')}
+                >
+                  <Text style={[styles.iconTabText, activeEditIconTab === 'library' && styles.iconTabTextActive]}>Yüklü</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
                   style={[styles.iconTab, activeEditIconTab === 'emoji' && styles.iconTabActive]}
                   onPress={() => setActiveEditIconTab('emoji')}
                 >
@@ -399,6 +402,18 @@ export default function PaymentDetailScreen() {
                       </TouchableOpacity>
                     ))}
                   </View>
+                </ScrollView>
+              ) : activeEditIconTab === 'library' ? (
+                <ScrollView contentContainerStyle={styles.uploadedGrid} showsVerticalScrollIndicator={false}>
+                  {uploadedIcons.length ? uploadedIcons.map(icon => (
+                    <TouchableOpacity
+                      key={icon.id}
+                      style={[styles.uploadedOption, editIconType === 'gallery' && editIconValue === icon.uri && styles.iconOptionActive]}
+                      onPress={() => { setEditIconType('gallery'); setEditIconValue(icon.uri); setShowEditIconPicker(false); }}
+                    >
+                      <Image source={{ uri: icon.uri }} style={styles.uploadedImage} />
+                    </TouchableOpacity>
+                  )) : <Text style={styles.emojiHint}>Ayarlar’dan ikon yükleyin veya Galeri’yi kullanın.</Text>}
                 </ScrollView>
               ) : (
                 <View style={styles.emojiInputSection}>
@@ -602,6 +617,9 @@ const styles = StyleSheet.create({
   iconGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   iconOption: { width: 58, height: 58, borderRadius: BorderRadius.md, backgroundColor: Colors.surfaceLight, alignItems: 'center', justifyContent: 'center' },
   iconOptionActive: { backgroundColor: Colors.primary },
+  uploadedGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingBottom: Spacing.lg },
+  uploadedOption: { width: 66, height: 66, borderRadius: BorderRadius.lg, padding: 5, backgroundColor: Colors.surfaceLight },
+  uploadedImage: { width: '100%', height: '100%', borderRadius: BorderRadius.md },
   emojiInputSection: { alignItems: 'center', paddingVertical: 8 },
   emojiHint: { fontFamily: 'Poppins_400Regular', fontSize: FontSize.sm, color: Colors.textSecondary },
   emojiTextInput: { fontSize: 36, textAlign: 'center', color: Colors.textPrimary, backgroundColor: Colors.surfaceLight, borderRadius: BorderRadius.md, padding: 16, marginVertical: 12, width: '100%' },

@@ -1,5 +1,5 @@
 import * as SQLite from 'expo-sqlite';
-import { Payment, Debt, DebtPayment, Category, Settings, AppSettings, Currency, BackupDestination, BackupFrequency } from '../constants/types';
+import { Payment, Debt, DebtPayment, Category, Settings, AppSettings, Currency, BackupDestination, BackupFrequency, UploadedIcon } from '../constants/types';
 import { formatLocalDateKey, parseLocalDate } from '../utils/helpers';
 
 const DATABASE_NAME = 'nox.db';
@@ -42,6 +42,8 @@ export const initializeDatabase = async (): Promise<void> => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       person_name TEXT NOT NULL,
       person_photo TEXT DEFAULT '',
+      icon_type TEXT NOT NULL DEFAULT 'icon',
+      icon_value TEXT NOT NULL DEFAULT 'account-cash',
       total_amount REAL NOT NULL,
       paid_amount REAL NOT NULL DEFAULT 0,
       currency TEXT NOT NULL DEFAULT 'TRY',
@@ -75,6 +77,13 @@ export const initializeDatabase = async (): Promise<void> => {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS uploaded_icons (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      uri TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   await migrateSchema(database);
@@ -96,6 +105,12 @@ const migrateSchema = async (database: SQLite.SQLiteDatabase): Promise<void> => 
   const debtColumns = await database.getAllAsync<{ name: string }>('PRAGMA table_info(debts)');
   if (!debtColumns.some(column => column.name === 'reminder_days')) {
     await database.execAsync("ALTER TABLE debts ADD COLUMN reminder_days TEXT DEFAULT '[]'");
+  }
+  if (!debtColumns.some(column => column.name === 'icon_type')) {
+    await database.execAsync("ALTER TABLE debts ADD COLUMN icon_type TEXT NOT NULL DEFAULT 'icon'");
+  }
+  if (!debtColumns.some(column => column.name === 'icon_value')) {
+    await database.execAsync("ALTER TABLE debts ADD COLUMN icon_value TEXT NOT NULL DEFAULT 'account-cash'");
   }
 };
 
@@ -181,6 +196,8 @@ const seedDefaultSettings = async (database: SQLite.SQLiteDatabase): Promise<voi
     { key: 'automaticBackupEnabled', value: 'false' },
     { key: 'backupFrequency', value: 'weekly' },
     { key: 'backupDestination', value: 'device' },
+    { key: 'backupDirectoryUri', value: '' },
+    { key: 'backupDirectoryLabel', value: '' },
     { key: 'lastBackupAt', value: '' },
   ];
 
@@ -192,7 +209,6 @@ const seedDefaultSettings = async (database: SQLite.SQLiteDatabase): Promise<voi
   }
 };
 
-//ÖDEMELER
 export const getPayments = async (): Promise<Payment[]> => {
   const database = await getDatabase();
   return await database.getAllAsync<Payment>('SELECT * FROM payments ORDER BY due_date ASC');
@@ -279,7 +295,6 @@ export const getMarkedDates = async (year: number, month: number): Promise<Recor
   return marked;
 };
 
-//DEBTS
 export const getDebts = async (direction?: 'owe' | 'owed'): Promise<Debt[]> => {
   const database = await getDatabase();
   if (direction) {
@@ -299,10 +314,10 @@ export const getDebtById = async (id: number): Promise<Debt | null> => {
 export const addDebt = async (debt: Omit<Debt, 'id' | 'created_at'>): Promise<number> => {
   const database = await getDatabase();
   const result = await database.runAsync(
-    `INSERT INTO debts (person_name, person_photo, total_amount, paid_amount, currency, debt_direction, due_date, interest_rate, notes, reminder_days, notification_ids)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO debts (person_name, person_photo, icon_type, icon_value, total_amount, paid_amount, currency, debt_direction, due_date, interest_rate, notes, reminder_days, notification_ids)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
-      debt.person_name, debt.person_photo, debt.total_amount, debt.paid_amount,
+      debt.person_name, debt.person_photo, debt.icon_type, debt.icon_value, debt.total_amount, debt.paid_amount,
       debt.currency, debt.debt_direction, debt.due_date, debt.interest_rate,
       debt.notes, debt.reminder_days, debt.notification_ids,
     ]
@@ -343,7 +358,6 @@ export const getDebtPayments = async (debtId: number): Promise<DebtPayment[]> =>
   );
 };
 
-//CATEGORIES
 export const getCategories = async (): Promise<Category[]> => {
   const database = await getDatabase();
   return await database.getAllAsync<Category>('SELECT * FROM categories ORDER BY is_custom ASC, name ASC');
@@ -362,7 +376,25 @@ export const deleteCategory = async (id: number): Promise<void> => {
   await database.runAsync('DELETE FROM categories WHERE id = ? AND is_custom = 1', [id]);
 };
 
-//SETTINGS
+export const getUploadedIcons = async (): Promise<UploadedIcon[]> => {
+  const database = await getDatabase();
+  return database.getAllAsync<UploadedIcon>('SELECT * FROM uploaded_icons ORDER BY created_at DESC, id DESC');
+};
+
+export const addUploadedIcon = async (uri: string, name = ''): Promise<number> => {
+  const database = await getDatabase();
+  const result = await database.runAsync(
+    'INSERT OR IGNORE INTO uploaded_icons (uri, name) VALUES (?, ?)',
+    [uri, name]
+  );
+  return result.lastInsertRowId;
+};
+
+export const deleteUploadedIcon = async (id: number): Promise<void> => {
+  const database = await getDatabase();
+  await database.runAsync('DELETE FROM uploaded_icons WHERE id = ?', [id]);
+};
+
 export const getSetting = async (key: string): Promise<string | null> => {
   const database = await getDatabase();
   const result = await database.getFirstAsync<Settings>('SELECT * FROM settings WHERE key = ?', [key]);
@@ -424,11 +456,12 @@ export const getAllSettings = async (): Promise<AppSettings> => {
     automaticBackupEnabled: map.automaticBackupEnabled === 'true',
     backupFrequency: (map.backupFrequency ?? 'weekly') as BackupFrequency,
     backupDestination: (map.backupDestination ?? 'device') as BackupDestination,
+    backupDirectoryUri: map.backupDirectoryUri ?? '',
+    backupDirectoryLabel: map.backupDirectoryLabel ?? '',
     lastBackupAt: map.lastBackupAt ?? '',
   };
 };
 
-//STATS
 export const getMonthlyStats = async (year: number, month: number) => {
   const database = await getDatabase();
   const monthStr = String(month).padStart(2, '0');
@@ -475,19 +508,20 @@ export const exportData = async () => {
   const debts = await database.getAllAsync<Debt>('SELECT * FROM debts');
   const debtPayments = await database.getAllAsync<DebtPayment>('SELECT * FROM debt_payments');
   const categories = await database.getAllAsync<Category>('SELECT * FROM categories');
-  //Güvenlik ayarları ve eski sürümlerden kalmış PIN hiçbir zaman yedeğe girmez.
+  const uploadedIcons = await database.getAllAsync<UploadedIcon>('SELECT * FROM uploaded_icons');
   const settings = await database.getAllAsync<Settings>(
-    "SELECT * FROM settings WHERE key NOT IN ('pinCode', 'pinEnabled', 'biometricEnabled', 'profilePhoto', 'notificationPrivacyMigrated')"
+    "SELECT * FROM settings WHERE key NOT IN ('pinCode', 'pinEnabled', 'biometricEnabled', 'notificationPrivacyMigrated', 'automaticBackupEnabled', 'backupDirectoryUri', 'backupDirectoryLabel', 'lastBackupAt')"
   );
 
   return JSON.stringify({
     format: 'nox-finance-backup',
-    version: 3,
+    version: 4,
     exportedAt: new Date().toISOString(),
     payments,
     debts,
     debtPayments,
     categories,
+    uploadedIcons,
     settings,
   }, null, 2);
 };
@@ -499,6 +533,7 @@ export const importData = async (raw: string): Promise<void> => {
   const debtPayments = parsed.debtPayments;
   const categories = parsed.categories;
   const settings = parsed.settings;
+  const uploadedIcons = Array.isArray(parsed.uploadedIcons) ? parsed.uploadedIcons : [];
 
   if (![payments, debts, debtPayments, categories, settings].every(Array.isArray)) {
     throw new Error('INVALID_BACKUP');
@@ -511,6 +546,7 @@ export const importData = async (raw: string): Promise<void> => {
       DELETE FROM debts;
       DELETE FROM payments;
       DELETE FROM categories;
+      DELETE FROM uploaded_icons;
     `);
 
     for (const item of payments as Payment[]) {
@@ -527,9 +563,9 @@ export const importData = async (raw: string): Promise<void> => {
     for (const item of debts as Debt[]) {
       const due = parseLocalDate(item.due_date);
       await transaction.runAsync(
-        `INSERT INTO debts (id, person_name, person_photo, total_amount, paid_amount, currency, debt_direction, due_date, interest_rate, notes, reminder_days, notification_ids, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)`,
-        [item.id, item.person_name, item.person_photo ?? '', item.total_amount, item.paid_amount,
+        `INSERT INTO debts (id, person_name, person_photo, icon_type, icon_value, total_amount, paid_amount, currency, debt_direction, due_date, interest_rate, notes, reminder_days, notification_ids, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)`,
+        [item.id, item.person_name, item.person_photo ?? '', item.icon_type ?? 'icon', item.icon_value ?? 'account-cash', item.total_amount, item.paid_amount,
           item.currency, item.debt_direction, due ? formatLocalDateKey(due) : '', item.interest_rate ?? 0,
           item.notes ?? '', item.reminder_days ?? '[]', item.created_at ?? new Date().toISOString()]
       );
@@ -549,7 +585,18 @@ export const importData = async (raw: string): Promise<void> => {
       );
     }
 
-    const protectedSettings = new Set(['pinCode', 'pinEnabled', 'biometricEnabled', 'notificationPrivacyMigrated']);
+    for (const item of uploadedIcons as UploadedIcon[]) {
+      if (!item?.uri) continue;
+      await transaction.runAsync(
+        'INSERT OR IGNORE INTO uploaded_icons (id, uri, name, created_at) VALUES (?, ?, ?, ?)',
+        [item.id, item.uri, item.name ?? '', item.created_at ?? new Date().toISOString()]
+      );
+    }
+
+    const protectedSettings = new Set([
+      'pinCode', 'pinEnabled', 'biometricEnabled', 'notificationPrivacyMigrated',
+      'automaticBackupEnabled', 'backupDirectoryUri', 'backupDirectoryLabel', 'lastBackupAt',
+    ]);
     for (const item of settings as Settings[]) {
       if (!item?.key || protectedSettings.has(item.key)) continue;
       await transaction.runAsync(
@@ -572,9 +619,10 @@ export const deleteAllData = async (): Promise<void> => {
       DELETE FROM debts;
       DELETE FROM payments;
       DELETE FROM categories;
+      DELETE FROM uploaded_icons;
       DELETE FROM settings;
       DELETE FROM sqlite_sequence
-        WHERE name IN ('payments', 'debts', 'debt_payments', 'categories');
+        WHERE name IN ('payments', 'debts', 'debt_payments', 'categories', 'uploaded_icons');
     `);
   });
 

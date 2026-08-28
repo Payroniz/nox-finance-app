@@ -79,7 +79,6 @@ export const parseNotificationIds = (value?: string | null): string[] => {
     const parsed = JSON.parse(value);
     if (Array.isArray(parsed)) return parsed.filter(id => typeof id === 'string' && id.length > 0);
   } catch {
-    // v2 ve daha eski kayıtlarda tek bir kimlik saklanıyordu.
   }
   return [value];
 };

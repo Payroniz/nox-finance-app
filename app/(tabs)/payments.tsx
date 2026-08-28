@@ -10,7 +10,7 @@ import { PaymentCard } from '../../src/components/PaymentCard';
 import {
   getPaymentsByDate, getMarkedDates, updatePaymentStatus, deletePayment, getPayments
 } from '../../src/db/database';
-import { getTodayString } from '../../src/utils/helpers';
+import { formatCurrency, getTodayString } from '../../src/utils/helpers';
 import { cancelNotification } from '../../src/utils/notifications';
 import { Payment } from '../../src/constants/types';
 
@@ -77,6 +77,9 @@ export default function PaymentsScreen() {
 
   const totalAllPages = Math.max(1, Math.ceil(allPayments.length / PAGE_SIZE));
   const pagedPayments = allPayments.slice((allPage - 1) * PAGE_SIZE, allPage * PAGE_SIZE);
+  const pendingPayments = allPayments.filter(item => item.status !== 'paid');
+  const pendingTotal = pendingPayments.reduce((sum, item) => sum + item.amount, 0);
+  const overdueCount = allPayments.filter(item => item.status === 'overdue').length;
 
   return (
     <View style={styles.container}>
@@ -96,6 +99,18 @@ export default function PaymentsScreen() {
         showsVerticalScrollIndicator={false}
         ListHeaderComponent={
           <>
+            <View style={styles.commandCard}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.commandEyebrow}>ÖDEME KONTROL MERKEZİ</Text>
+                <Text style={styles.commandAmount}>{formatCurrency(pendingTotal, 'TRY')}</Text>
+                <Text style={styles.commandCaption}>bekleyen toplam • {pendingPayments.length} kayıt</Text>
+              </View>
+              <View style={[styles.riskBubble, { backgroundColor: overdueCount ? `${Colors.danger}22` : `${Colors.success}22` }]}>
+                <MaterialCommunityIcons name={overdueCount ? 'alert-decagram' : 'check-decagram'} size={24} color={overdueCount ? Colors.danger : Colors.success} />
+                <Text style={[styles.riskValue, { color: overdueCount ? Colors.danger : Colors.success }]}>{overdueCount}</Text>
+                <Text style={styles.riskLabel}>gecikmiş</Text>
+              </View>
+            </View>
             {/* Calendar */}
             <Calendar
               current={today}
@@ -237,6 +252,13 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
     overflow: 'hidden',
   },
+  commandCard: { flexDirection: 'row', alignItems: 'center', marginHorizontal: Spacing.lg, marginBottom: Spacing.md, padding: Spacing.lg, borderRadius: BorderRadius.xl, backgroundColor: '#312D72', overflow: 'hidden', ...Shadow.primary },
+  commandEyebrow: { fontFamily: 'Poppins_600SemiBold', fontSize: 9, letterSpacing: 1.3, color: Colors.primaryLight },
+  commandAmount: { fontFamily: 'Poppins_800ExtraBold', fontSize: FontSize.xxl, color: '#fff', marginTop: 3 },
+  commandCaption: { fontFamily: 'Poppins_400Regular', fontSize: FontSize.xs, color: 'rgba(255,255,255,0.65)' },
+  riskBubble: { width: 74, height: 74, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  riskValue: { fontFamily: 'Poppins_700Bold', fontSize: FontSize.md, lineHeight: 17 },
+  riskLabel: { fontFamily: 'Poppins_400Regular', fontSize: 8, color: Colors.textSecondary },
   dayHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',

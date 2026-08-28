@@ -30,7 +30,6 @@ export const deleteSecurePin = async (): Promise<void> => {
   if (await isSecureStorageAvailable()) {
     await SecureStore.deleteItemAsync(PIN_KEY);
   }
-  //Eski sürümlerden kalabilecek açık PIN kaydını da temizle.
   await purgeLegacyPin();
 };
 

@@ -1,21 +1,17 @@
 export const Colors = {
-  //Ana renkler
   primary: '#6C63FF',
   primaryLight: '#8B84FF',
   primaryDark: '#4F48CC',
 
-  //Arka planlar
   background: '#1E1E2E',
   surface: '#2A2A3E',
   surfaceLight: '#32324A',
   surfaceBorder: '#3A3A52',
 
-  //Metin
   textPrimary: '#FFFFFF',
   textSecondary: '#A0A0B8',
   textMuted: '#6B6B80',
 
-  //Durum renkleri
   success: '#4CAF82',
   successLight: '#E8F5EE',
   warning: '#F5A623',
@@ -24,12 +20,10 @@ export const Colors = {
   dangerLight: '#FFE8E8',
   info: '#64B5F6',
 
-  //Para birimi renkleri
   tl: '#E53935',
   usd: '#2E7D32',
   eur: '#1565C0',
 
-  //Kategori renkleri
   categories: {
     fatura: '#FF6B6B',
     abonelik: '#6C63FF',
@@ -39,12 +33,10 @@ export const Colors = {
     custom: '#26C6DA',
   },
 
-  //Gradyanlar (array olarak)
   gradientPrimary: ['#6C63FF', '#9C27B0'],
   gradientSuccess: ['#4CAF82', '#00BCD4'],
   gradientDanger: ['#FF5B5B', '#FF8C42'],
 
-  //Tab bar
   tabBar: '#1A1A2E',
   tabBarBorder: '#2A2A3E',
 };

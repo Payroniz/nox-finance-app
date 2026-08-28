@@ -9,11 +9,12 @@ import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { Colors, Spacing, BorderRadius, FontSize, Shadow } from '../../src/constants/theme';
-import { addPayment, getAllSettings, getCategories, updatePayment } from '../../src/db/database';
+import { addPayment, addUploadedIcon, getAllSettings, getCategories, getUploadedIcons, updatePayment } from '../../src/db/database';
 import { schedulePaymentNotification } from '../../src/utils/notifications';
 import { CurrencyInput } from '../../src/components/CurrencyInput';
-import { Currency, RecurrenceType } from '../../src/constants/types';
+import { Currency, RecurrenceType, UploadedIcon } from '../../src/constants/types';
 import { formatLocalDateKey } from '../../src/utils/helpers';
+import { persistMediaFile } from '../../src/utils/media';
 
 const CURRENCIES: { value: Currency; symbol: string }[] = [
   { value: 'TRY', symbol: '₺' },
@@ -30,31 +31,22 @@ const RECURRENCE: { value: RecurrenceType; label: string; icon: string }[] = [
 ];
 
 const QUICK_ICONS = [
-  // Para & Finans
   'cash', 'credit-card', 'bank', 'wallet', 'currency-usd', 'piggy-bank',
   'receipt', 'invoice-text', 'finance', 'trending-up', 'trending-down', 'chart-line',
-  // Ev & Yaşam
   'home', 'home-city', 'sofa', 'bed', 'shower', 'flash',
   'water', 'fire', 'hvac', 'washing-machine', 'fridge', 'television',
-  // Ulaşım
   'car', 'car-wash', 'gas-station', 'airplane', 'train', 'bus',
   'motorbike', 'bicycle', 'taxi', 'ferry', 'parking', 'road',
-  // Teknoloji & İletişim
   'phone', 'wifi', 'cellphone', 'laptop', 'tablet', 'monitor',
   'printer', 'headphones', 'camera', 'router-wireless', 'cloud', 'server',
-  // Sağlık & Spor
   'medical-bag', 'hospital-box', 'heart-pulse', 'pill', 'tooth', 'eye',
   'dumbbell', 'yoga', 'run', 'swim', 'soccer', 'basketball',
-  // Yiyecek & İçecek
   'food', 'coffee', 'food-fork-drink', 'pizza', 'hamburger', 'cake',
   'fruit-watermelon', 'cup', 'bottle-wine', 'grocery', 'silverware', 'chef-hat',
-  // Eğitim & Kültür
   'school', 'book', 'bookshelf', 'pencil', 'graduation-cap', 'library',
   'music', 'music-note', 'theater', 'palette', 'film', 'gamepad',
-  // Alışveriş & Hizmet
   'cart', 'store', 'tag', 'gift', 'hanger', 'shoe-heel',
   'scissors', 'hammer', 'tools', 'broom', 'face-woman', 'baby-carriage',
-  // Diğer
   'star', 'heart', 'flower', 'leaf', 'paw', 'earth',
   'shield', 'lock', 'key', 'bell', 'alarm', 'calendar',
 ];
@@ -91,14 +83,16 @@ export default function AddPaymentScreen() {
   const [categories, setCategories] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [showIconPicker, setShowIconPicker] = useState(false);
-  const [activeIconTab, setActiveIconTab] = useState<'icon' | 'emoji'>('icon');
+  const [activeIconTab, setActiveIconTab] = useState<'icon' | 'library' | 'emoji'>('icon');
   const [emojiInput, setEmojiInput] = useState('');
+  const [uploadedIcons, setUploadedIcons] = useState<UploadedIcon[]>([]);
 
   useFocusEffect(useCallback(() => {
-    Promise.all([getCategories(), getAllSettings()]).then(([categoryList, appSettings]) => {
+    Promise.all([getCategories(), getAllSettings(), getUploadedIcons()]).then(([categoryList, appSettings, icons]) => {
       setCategories(categoryList);
       setReminderDays(appSettings.defaultReminderDays);
       setCurrency(appSettings.defaultCurrency);
+      setUploadedIcons(icons);
     });
   }, []));
 
@@ -169,8 +163,11 @@ export default function AddPaymentScreen() {
       quality: 0.7,
     });
     if (!result.canceled && result.assets[0]) {
+      const uri = await persistMediaFile(result.assets[0].uri, 'icon');
+      await addUploadedIcon(uri, result.assets[0].fileName || name.trim() || 'Ödeme ikonu');
       setIconType('gallery');
-      setIconValue(result.assets[0].uri);
+      setIconValue(uri);
+      setUploadedIcons(await getUploadedIcons());
       setShowIconPicker(false);
     }
   };
@@ -403,6 +400,12 @@ export default function AddPaymentScreen() {
                 <Text style={[styles.iconTabText, activeIconTab === 'icon' && styles.iconTabTextActive]}>İkonlar</Text>
               </TouchableOpacity>
               <TouchableOpacity
+                style={[styles.iconTab, activeIconTab === 'library' && styles.iconTabActive]}
+                onPress={() => setActiveIconTab('library')}
+              >
+                <Text style={[styles.iconTabText, activeIconTab === 'library' && styles.iconTabTextActive]}>Yüklü</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
                 style={[styles.iconTab, activeIconTab === 'emoji' && styles.iconTabActive]}
                 onPress={() => setActiveIconTab('emoji')}
               >
@@ -417,7 +420,7 @@ export default function AddPaymentScreen() {
             </View>
 
             {activeIconTab === 'icon' ? (
-              <View style={styles.iconGrid}>
+              <ScrollView contentContainerStyle={styles.iconGrid} showsVerticalScrollIndicator={false}>
                 {QUICK_ICONS.map(icon => (
                   <TouchableOpacity
                     key={icon}
@@ -435,7 +438,24 @@ export default function AddPaymentScreen() {
                     />
                   </TouchableOpacity>
                 ))}
-              </View>
+              </ScrollView>
+            ) : activeIconTab === 'library' ? (
+              <ScrollView contentContainerStyle={styles.uploadedGrid} showsVerticalScrollIndicator={false}>
+                {uploadedIcons.length ? uploadedIcons.map(icon => (
+                  <TouchableOpacity
+                    key={icon.id}
+                    style={[styles.uploadedOption, iconType === 'gallery' && iconValue === icon.uri && styles.iconOptionActive]}
+                    onPress={() => { setIconType('gallery'); setIconValue(icon.uri); setShowIconPicker(false); }}
+                  >
+                    <Image source={{ uri: icon.uri }} style={styles.uploadedImage} />
+                  </TouchableOpacity>
+                )) : (
+                  <View style={styles.emptyIcons}>
+                    <MaterialCommunityIcons name="image-plus-outline" size={40} color={Colors.textMuted} />
+                    <Text style={styles.emojiHint}>Ayarlar’dan ikon yükleyin veya Galeri’yi kullanın.</Text>
+                  </View>
+                )}
+              </ScrollView>
             ) : (
               <View style={styles.emojiInputSection}>
                 <Text style={styles.emojiHint}>Emoji yapıştırın veya yazın</Text>
@@ -621,7 +641,6 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   recBtnTextActive: { color: '#fff', fontFamily: 'Poppins_500Medium' },
-  // Modal
   modalOverlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.75)',
     justifyContent: 'flex-end',
@@ -667,6 +686,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10,
   },
+  uploadedGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingBottom: Spacing.lg },
+  uploadedOption: { width: 66, height: 66, borderRadius: BorderRadius.lg, padding: 5, backgroundColor: Colors.surfaceLight },
+  uploadedImage: { width: '100%', height: '100%', borderRadius: BorderRadius.md },
+  emptyIcons: { width: '100%', alignItems: 'center', gap: Spacing.sm, paddingVertical: Spacing.xxl },
   iconOption: {
     width: 58, height: 58,
     borderRadius: BorderRadius.md,

@@ -21,7 +21,7 @@ export default function TabLayout() {
         tabBarInactiveTintColor: Colors.textMuted,
         tabBarLabelStyle: {
           fontFamily: 'Poppins_500Medium',
-          fontSize: 11,
+          fontSize: 9,
         },
       }}
     >
@@ -58,6 +58,15 @@ export default function TabLayout() {
           title: 'İstatistik',
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="chart-bar" color={color} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="planner"
+        options={{
+          title: 'Plan',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="timeline-clock-outline" color={color} size={size} />
           ),
         }}
       />

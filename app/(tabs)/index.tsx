@@ -292,6 +292,18 @@ export default function Dashboard() {
           </TouchableOpacity>
         </View>
 
+        <TouchableOpacity style={styles.plannerBanner} activeOpacity={0.86} onPress={() => router.push('/(tabs)/planner' as any)}>
+          <View style={styles.plannerIconWrap}>
+            <MaterialCommunityIcons name="timeline-clock-outline" size={27} color="#fff" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.plannerEyebrow}>YENİ • AKILLI FİNANS PLANI</Text>
+            <Text style={styles.plannerTitle}>Önündeki 90 günü gör</Text>
+            <Text style={styles.plannerText}>Ödeme, borç ve alacakları tek nakit akışında keşfet.</Text>
+          </View>
+          <MaterialCommunityIcons name="arrow-top-right" size={21} color={Colors.primaryLight} />
+        </TouchableOpacity>
+
         {/* ── NET FINANCIAL SNAPSHOT ── */}
         <Card style={styles.snapshotCard}>
           <View style={styles.snapshotHeader}>
@@ -679,6 +691,11 @@ const styles = StyleSheet.create({
     fontSize: FontSize.md,
     color: '#fff',
   },
+  plannerBanner: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, padding: Spacing.md, marginBottom: Spacing.lg, backgroundColor: '#272451', borderRadius: BorderRadius.xl, borderWidth: 1, borderColor: `${Colors.primary}55` },
+  plannerIconWrap: { width: 50, height: 50, borderRadius: BorderRadius.lg, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center', ...Shadow.primary },
+  plannerEyebrow: { fontFamily: 'Poppins_600SemiBold', fontSize: 8, letterSpacing: 1, color: Colors.primaryLight },
+  plannerTitle: { fontFamily: 'Poppins_700Bold', fontSize: FontSize.md, color: Colors.textPrimary, marginTop: 1 },
+  plannerText: { fontFamily: 'Poppins_400Regular', fontSize: 10, color: Colors.textSecondary, marginTop: 1 },
 
   snapshotCard: {
     marginBottom: Spacing.lg,

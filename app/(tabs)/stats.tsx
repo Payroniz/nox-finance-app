@@ -16,6 +16,7 @@ export default function StatsScreen() {
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
   const [stats, setStats] = useState<any>(null);
+  const [previousStats, setPreviousStats] = useState<any>(null);
   const [debtStats, setDebtStats] = useState({ totalOwe: 0, totalOwed: 0 });
   const [paymentStats, setPaymentStats] = useState({ totalPaid: 0, totalPending: 0, paidCount: 0, pendingCount: 0 });
 
@@ -24,13 +25,17 @@ export default function StatsScreen() {
   }, [selectedYear, selectedMonth]));
 
   const loadStats = async () => {
-    const [monthly, oweDebts, owedDebts, allPayments] = await Promise.all([
+    const previousMonth = selectedMonth === 1 ? 12 : selectedMonth - 1;
+    const previousYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear;
+    const [monthly, previous, oweDebts, owedDebts, allPayments] = await Promise.all([
       getMonthlyStats(selectedYear, selectedMonth),
+      getMonthlyStats(previousYear, previousMonth),
       getDebts('owe'),
       getDebts('owed'),
       getPayments(),
     ]);
     setStats(monthly);
+    setPreviousStats(previous);
     setDebtStats({
       totalOwe: oweDebts.reduce((s, d) => s + (d.total_amount - d.paid_amount), 0),
       totalOwed: owedDebts.reduce((s, d) => s + (d.total_amount - d.paid_amount), 0),
@@ -61,6 +66,13 @@ export default function StatsScreen() {
 
   const totalWeekly = stats?.weeklyData?.reduce((s: number, d: any) => s + d.amount, 0) || 0;
   const maxWeekly = stats?.weeklyData ? Math.max(...stats.weeklyData.map((d: any) => d.amount), 1) : 1;
+  const recordCount = (stats?.paidCount ?? 0) + (stats?.pendingCount ?? 0) + (stats?.overdueCount ?? 0);
+  const averagePayment = recordCount ? (stats?.totalExpense ?? 0) / recordCount : 0;
+  const topCategory = [...(stats?.categoryBreakdown ?? [])].sort((a: any, b: any) => b.amount - a.amount)[0];
+  const monthDelta = previousStats?.totalExpense > 0
+    ? ((stats?.totalExpense - previousStats.totalExpense) / previousStats.totalExpense) * 100
+    : null;
+  const paymentHealth = recordCount ? Math.round(((stats?.paidCount ?? 0) / recordCount) * 100) : 100;
 
   return (
     <View style={styles.container}>
@@ -69,7 +81,14 @@ export default function StatsScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>İstatistikler</Text>
+          <View>
+            <Text style={styles.headerEyebrow}>FİNANSAL ZEKA MERKEZİ</Text>
+            <Text style={styles.headerTitle}>İstatistikler</Text>
+          </View>
+          <View style={[styles.healthBadge, { borderColor: paymentHealth >= 70 ? Colors.success : Colors.warning }]}>
+            <Text style={styles.healthValue}>{paymentHealth}</Text>
+            <Text style={styles.healthLabel}>skor</Text>
+          </View>
         </View>
 
         {/* Month selector */}
@@ -87,6 +106,14 @@ export default function StatsScreen() {
         <Card style={[styles.totalCard, { backgroundColor: Colors.primary }]}>
           <Text style={styles.totalLabel}>Toplam Harcama</Text>
           <Text style={styles.totalAmount}>{formatCurrency(stats?.totalExpense ?? 0, 'TRY')}</Text>
+          {monthDelta !== null ? (
+            <View style={styles.deltaPill}>
+              <MaterialCommunityIcons name={monthDelta > 0 ? 'trending-up' : 'trending-down'} size={14} color={monthDelta > 0 ? Colors.warning : Colors.success} />
+              <Text style={[styles.deltaText, { color: monthDelta > 0 ? Colors.warning : Colors.success }]}>
+                Önceki aya göre %{Math.abs(monthDelta).toFixed(1)} {monthDelta > 0 ? 'daha yüksek' : 'daha düşük'}
+              </Text>
+            </View>
+          ) : null}
           <View style={styles.statusRow}>
             <View style={styles.statusItem}>
               <View style={[styles.statusDot, { backgroundColor: Colors.success }]} />
@@ -102,6 +129,24 @@ export default function StatsScreen() {
             </View>
           </View>
         </Card>
+
+        <View style={styles.metricGrid}>
+          <View style={styles.metricCard}>
+            <View style={[styles.metricIcon, { backgroundColor: `${Colors.info}18` }]}><MaterialCommunityIcons name="calculator-variant-outline" size={20} color={Colors.info} /></View>
+            <Text style={styles.metricLabel}>Ortalama ödeme</Text>
+            <Text style={styles.metricValue}>{formatCurrency(averagePayment, 'TRY')}</Text>
+          </View>
+          <View style={styles.metricCard}>
+            <View style={[styles.metricIcon, { backgroundColor: `${Colors.primary}18` }]}><MaterialCommunityIcons name="crown-outline" size={20} color={Colors.primaryLight} /></View>
+            <Text style={styles.metricLabel}>Lider kategori</Text>
+            <Text style={styles.metricValue} numberOfLines={1}>{topCategory?.category ?? '—'}</Text>
+          </View>
+          <View style={styles.metricCard}>
+            <View style={[styles.metricIcon, { backgroundColor: `${Colors.success}18` }]}><MaterialCommunityIcons name="check-decagram-outline" size={20} color={Colors.success} /></View>
+            <Text style={styles.metricLabel}>Tamamlama</Text>
+            <Text style={styles.metricValue}>%{paymentHealth}</Text>
+          </View>
+        </View>
 
         {/* Weekly trend */}
         <Card style={styles.sectionCard}>
@@ -225,7 +270,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   content: { padding: Spacing.lg },
   header: {
-    paddingTop: Spacing.xxxl,
+    paddingTop: Spacing.xxxl, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     marginBottom: Spacing.lg,
   },
   headerTitle: {
@@ -233,6 +278,10 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xxl,
     color: Colors.textPrimary,
   },
+  headerEyebrow: { fontFamily: 'Poppins_600SemiBold', fontSize: 9, letterSpacing: 1.4, color: Colors.primaryLight },
+  healthBadge: { width: 56, height: 56, borderRadius: 28, borderWidth: 3, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
+  healthValue: { fontFamily: 'Poppins_700Bold', fontSize: FontSize.lg, lineHeight: 19, color: Colors.textPrimary },
+  healthLabel: { fontFamily: 'Poppins_400Regular', fontSize: 8, color: Colors.textMuted },
   monthSelector: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -271,6 +320,13 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginBottom: Spacing.md,
   },
+  deltaPill: { alignSelf: 'flex-start', flexDirection: 'row', gap: 6, alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.1)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: BorderRadius.full, marginBottom: Spacing.md },
+  deltaText: { fontFamily: 'Poppins_500Medium', fontSize: FontSize.xs },
+  metricGrid: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.lg },
+  metricCard: { flex: 1, minHeight: 112, backgroundColor: Colors.surface, borderRadius: BorderRadius.lg, padding: Spacing.sm, borderWidth: 1, borderColor: Colors.surfaceBorder },
+  metricIcon: { width: 34, height: 34, borderRadius: BorderRadius.md, alignItems: 'center', justifyContent: 'center', marginBottom: Spacing.sm },
+  metricLabel: { fontFamily: 'Poppins_400Regular', fontSize: 9, color: Colors.textMuted },
+  metricValue: { fontFamily: 'Poppins_700Bold', fontSize: FontSize.sm, color: Colors.textPrimary, marginTop: 3 },
   statusRow: {
     flexDirection: 'row',
     gap: Spacing.md,

@@ -43,6 +43,10 @@ export default function DebtsScreen() {
 
   const totalOwe = oweDebts.reduce((s, d) => s + (d.total_amount - d.paid_amount), 0);
   const totalOwed = owedDebts.reduce((s, d) => s + (d.total_amount - d.paid_amount), 0);
+  const netPosition = totalOwed - totalOwe;
+  const totalPrincipal = [...oweDebts, ...owedDebts].reduce((s, d) => s + d.total_amount, 0);
+  const totalPaid = [...oweDebts, ...owedDebts].reduce((s, d) => s + d.paid_amount, 0);
+  const settlementRate = totalPrincipal ? Math.round((totalPaid / totalPrincipal) * 100) : 0;
 
   return (
     <View style={styles.container}>
@@ -57,6 +61,22 @@ export default function DebtsScreen() {
         >
           <MaterialCommunityIcons name="plus" size={22} color="#fff" />
         </TouchableOpacity>
+      </View>
+
+      <View style={styles.netHero}>
+        <View style={styles.netHeroTop}>
+          <View>
+            <Text style={styles.netEyebrow}>NET BORÇ POZİSYONU</Text>
+            <Text style={[styles.netValue, { color: netPosition >= 0 ? Colors.success : Colors.danger }]}>
+              {netPosition >= 0 ? '+' : '−'}{formatCurrency(Math.abs(netPosition), 'TRY')}
+            </Text>
+          </View>
+          <View style={styles.settlementBadge}>
+            <Text style={styles.settlementValue}>%{settlementRate}</Text>
+            <Text style={styles.settlementLabel}>kapatıldı</Text>
+          </View>
+        </View>
+        <View style={styles.netTrack}><View style={[styles.netFill, { width: `${settlementRate}%` }]} /></View>
       </View>
 
       {/* Summary cards */}
@@ -181,6 +201,15 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     marginBottom: Spacing.lg,
   },
+  netHero: { marginHorizontal: Spacing.lg, marginBottom: Spacing.md, padding: Spacing.lg, borderRadius: BorderRadius.xl, backgroundColor: '#312D72', ...Shadow.primary },
+  netHeroTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: Spacing.md },
+  netEyebrow: { fontFamily: 'Poppins_600SemiBold', fontSize: 9, letterSpacing: 1.3, color: Colors.primaryLight },
+  netValue: { fontFamily: 'Poppins_800ExtraBold', fontSize: FontSize.xxl, marginTop: 3 },
+  settlementBadge: { width: 70, height: 58, borderRadius: BorderRadius.lg, backgroundColor: 'rgba(255,255,255,0.09)', alignItems: 'center', justifyContent: 'center' },
+  settlementValue: { fontFamily: 'Poppins_700Bold', fontSize: FontSize.md, color: '#fff' },
+  settlementLabel: { fontFamily: 'Poppins_400Regular', fontSize: 8, color: Colors.textSecondary },
+  netTrack: { height: 7, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.12)', overflow: 'hidden' },
+  netFill: { height: '100%', borderRadius: 4, backgroundColor: Colors.success },
   summaryCard: {
     flex: 1,
     backgroundColor: Colors.surface,

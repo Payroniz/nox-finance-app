@@ -1,19 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert, StatusBar, Modal, Image,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { Colors, Spacing, BorderRadius, FontSize, Shadow } from '../../src/constants/theme';
-import { addDebt, updateDebt } from '../../src/db/database';
+import { addDebt, addUploadedIcon, getAllSettings, getUploadedIcons, updateDebt } from '../../src/db/database';
 import { scheduleDebtNotification } from '../../src/utils/notifications';
 import { CurrencyInput } from '../../src/components/CurrencyInput';
-import { Currency, DebtDirection } from '../../src/constants/types';
+import { Currency, DebtDirection, IconType, UploadedIcon } from '../../src/constants/types';
 import { formatLocalDateKey } from '../../src/utils/helpers';
+import { persistMediaFile } from '../../src/utils/media';
 
 const CURRENCIES: { value: Currency; symbol: string; name: string }[] = [
   { value: 'TRY', symbol: '₺', name: 'Türk Lirası' },
@@ -41,6 +42,10 @@ const InputGroup = ({ label, children, hint }: { label: string; children: React.
 export default function AddDebtScreen() {
   const [personName, setPersonName] = useState('');
   const [personPhoto, setPersonPhoto] = useState('');
+  const [iconType, setIconType] = useState<IconType>('icon');
+  const [iconValue, setIconValue] = useState('account-cash');
+  const [showIconPicker, setShowIconPicker] = useState(false);
+  const [uploadedIcons, setUploadedIcons] = useState<UploadedIcon[]>([]);
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState<Currency>('TRY');
   const [direction, setDirection] = useState<DebtDirection>('owe');
@@ -53,6 +58,14 @@ export default function AddDebtScreen() {
   const [saving, setSaving] = useState(false);
   const [showInterest, setShowInterest] = useState(false);
 
+  useFocusEffect(useCallback(() => {
+    Promise.all([getUploadedIcons(), getAllSettings()]).then(([icons, settings]) => {
+      setUploadedIcons(icons);
+      setCurrency(settings.defaultCurrency);
+      setReminderDays(settings.defaultReminderDays);
+    });
+  }, []));
+
   const handlePickPhoto = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: 'images',
@@ -61,7 +74,13 @@ export default function AddDebtScreen() {
       quality: 0.7,
     });
     if (!result.canceled && result.assets[0]) {
-      setPersonPhoto(result.assets[0].uri);
+      const uri = await persistMediaFile(result.assets[0].uri, 'icon');
+      await addUploadedIcon(uri, result.assets[0].fileName || personName.trim() || 'Borç ikonu');
+      setPersonPhoto(uri);
+      setIconType('gallery');
+      setIconValue(uri);
+      setUploadedIcons(await getUploadedIcons());
+      setShowIconPicker(false);
     }
   };
 
@@ -94,6 +113,8 @@ export default function AddDebtScreen() {
       const debtId = await addDebt({
         person_name: personName.trim(),
         person_photo: personPhoto,
+        icon_type: iconType,
+        icon_value: iconValue,
         total_amount: parsedAmount,
         paid_amount: 0,
         currency,
@@ -154,12 +175,14 @@ export default function AddDebtScreen() {
 
         {/* Kişi / Fotoğraf */}
         <View style={styles.personRow}>
-          <TouchableOpacity style={styles.photoBtn} onPress={handlePickPhoto}>
-            {personPhoto ? (
-              <Image source={{ uri: personPhoto }} style={styles.personPhoto} />
+          <TouchableOpacity style={styles.photoBtn} onPress={() => setShowIconPicker(true)}>
+            {iconType === 'gallery' && iconValue ? (
+              <Image source={{ uri: iconValue }} style={styles.personPhoto} />
+            ) : iconType === 'emoji' ? (
+              <View style={styles.personPhotoPlaceholder}><Text style={{ fontSize: 30 }}>{iconValue}</Text></View>
             ) : (
               <View style={styles.personPhotoPlaceholder}>
-                <MaterialCommunityIcons name="account-plus" size={28} color={Colors.primary} />
+                <MaterialCommunityIcons name={iconValue as any} size={28} color={Colors.primary} />
               </View>
             )}
             <View style={styles.photoBadge}>
@@ -362,6 +385,41 @@ export default function AddDebtScreen() {
       </ScrollView>
 
       {/* Date Picker */}
+      <Modal visible={showIconPicker} transparent animationType="slide" onRequestClose={() => setShowIconPicker(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.iconSheet}>
+            <View style={styles.iconSheetHeader}>
+              <View>
+                <Text style={styles.iconSheetTitle}>Borç İkonu</Text>
+                <Text style={styles.iconSheetSubtitle}>Yüklü ikonlardan hızlıca seçin.</Text>
+              </View>
+              <TouchableOpacity onPress={() => setShowIconPicker(false)}><MaterialCommunityIcons name="close" size={22} color={Colors.textSecondary} /></TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={styles.uploadedGrid} showsVerticalScrollIndicator={false}>
+              <TouchableOpacity
+                style={[styles.builtInIcon, iconType === 'icon' && styles.selectedIcon]}
+                onPress={() => { setIconType('icon'); setIconValue('account-cash'); setPersonPhoto(''); setShowIconPicker(false); }}
+              >
+                <MaterialCommunityIcons name="account-cash" size={30} color={iconType === 'icon' ? '#fff' : Colors.primary} />
+              </TouchableOpacity>
+              {uploadedIcons.map(icon => (
+                <TouchableOpacity
+                  key={icon.id}
+                  style={[styles.uploadedIcon, iconValue === icon.uri && styles.selectedIcon]}
+                  onPress={() => { setIconType('gallery'); setIconValue(icon.uri); setPersonPhoto(icon.uri); setShowIconPicker(false); }}
+                >
+                  <Image source={{ uri: icon.uri }} style={styles.uploadedIconImage} />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={styles.galleryAction} onPress={handlePickPhoto}>
+              <MaterialCommunityIcons name="image-plus-outline" size={20} color="#fff" />
+              <Text style={styles.galleryActionText}>Galeriden Yeni İkon Yükle</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       <DateTimePickerModal
         isVisible={showDatePicker}
         mode="date"
@@ -606,4 +664,16 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     flex: 1,
   },
+  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(8,8,18,0.75)' },
+  iconSheet: { maxHeight: '70%', backgroundColor: Colors.surface, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: Spacing.xl, paddingBottom: 36 },
+  iconSheetHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: Spacing.lg },
+  iconSheetTitle: { fontFamily: 'Poppins_700Bold', fontSize: FontSize.xl, color: Colors.textPrimary },
+  iconSheetSubtitle: { fontFamily: 'Poppins_400Regular', fontSize: FontSize.xs, color: Colors.textSecondary },
+  uploadedGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingBottom: Spacing.lg },
+  uploadedIcon: { width: 66, height: 66, borderRadius: BorderRadius.lg, backgroundColor: Colors.surfaceLight, padding: 5 },
+  uploadedIconImage: { width: '100%', height: '100%', borderRadius: BorderRadius.md },
+  builtInIcon: { width: 66, height: 66, borderRadius: BorderRadius.lg, backgroundColor: Colors.surfaceLight, alignItems: 'center', justifyContent: 'center' },
+  selectedIcon: { backgroundColor: Colors.primary, borderWidth: 2, borderColor: Colors.primaryLight },
+  galleryAction: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Spacing.sm, backgroundColor: Colors.primary, borderRadius: BorderRadius.lg, paddingVertical: 14 },
+  galleryActionText: { fontFamily: 'Poppins_600SemiBold', fontSize: FontSize.sm, color: '#fff' },
 });

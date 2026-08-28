@@ -7,6 +7,13 @@ export type DebtStatus = 'ontime' | 'approaching' | 'overdue';
 export type BackupFrequency = 'daily' | 'weekly' | 'monthly';
 export type BackupDestination = 'device' | 'google-drive' | 'dropbox' | 'onedrive' | 'share';
 
+export interface UploadedIcon {
+  id: number;
+  uri: string;
+  name: string;
+  created_at: string;
+}
+
 export interface Payment {
   id: number;
   name: string;
@@ -29,6 +36,8 @@ export interface Debt {
   id: number;
   person_name: string;
   person_photo: string;
+  icon_type: IconType;
+  icon_value: string;
   total_amount: number;
   paid_amount: number;
   currency: Currency;
@@ -77,6 +86,8 @@ export interface AppSettings {
   automaticBackupEnabled: boolean;
   backupFrequency: BackupFrequency;
   backupDestination: BackupDestination;
+  backupDirectoryUri: string;
+  backupDirectoryLabel: string;
   lastBackupAt: string;
 }
 
