@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "NoX",
-    "slug": "nox-finance",
+    "slug": "nox-finance-app",
     "version": "3.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -24,7 +24,9 @@
       "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.SCHEDULE_EXACT_ALARM",
-        "android.permission.RECEIVE_BOOT_COMPLETED"
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.USE_BIOMETRIC",
+        "android.permission.USE_FINGERPRINT"
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
@@ -101,11 +103,16 @@
     },
     "extra": {
       "router": {
-        "origin": false
+        "origin": false,
+        "headers": {
+          "Cross-Origin-Embedder-Policy": "credentialless",
+          "Cross-Origin-Opener-Policy": "same-origin"
+        }
       },
       "eas": {
-        "projectId": "923d50fb-1994-418a-8dd3-d8b93f734fcd"
+        "projectId": "88cd3a9d-99b7-4b55-b607-2540f2927cc7"
       }
-    }
+    },
+    "owner": "nox-finance-app"
   }
 }
