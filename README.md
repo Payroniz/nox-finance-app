@@ -57,7 +57,7 @@ NoX Finance is an Expo application for tracking one-time or recurring payments, 
   <tr>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/c99b5648-46ee-4334-988a-79c0e370da90" width="260" alt="Borçlar" />
-      <br><sub><b>Debts</b></sub>
+      <br><sub><b>Statistics 2</b></sub>
     </td>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/ccbd4c87-7200-4f55-a767-b886341ca43b" width="260" alt="Finans planı" />
@@ -65,37 +65,37 @@ NoX Finance is an Expo application for tracking one-time or recurring payments, 
     </td>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/8d1b198b-cda2-447e-ac59-71b631189774" width="260" alt="Ödeme ekleme" />
-      <br><sub><b>Add Payment</b></sub>
+      <br><sub><b>Settings</b></sub>
     </td>
   </tr>
 
   <tr>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/72a803b0-748c-41cf-86bd-173d862b290a" width="260" alt="Borç ekleme" />
-      <br><sub><b>Add Debt</b></sub>
+      <br><sub><b>Settings 2</b></sub>
     </td>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/d2cdb4d7-abfd-42fd-b492-1cc01c1531c7" width="260" alt="Ayarlar" />
-      <br><sub><b>Settings</b></sub>
+      <br><sub><b>Backup</b></sub>
     </td>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/7e40bf47-0346-49ed-a841-3f4673a6cca6" width="260" alt="Yedekleme" />
-      <br><sub><b>Backup</b></sub>
+      <br><sub><b>Reminders</b></sub>
     </td>
   </tr>
 
   <tr>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/51a2bc5a-3ce1-4df1-8e51-61e24a572774" width="260" alt="Bildirim ayarları" />
-      <br><sub><b>Notification Settings</b></sub>
+      <br><sub><b>Add Payment</b></sub>
     </td>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/f3888f14-fa8f-4bc0-a0b5-67b704a1278f" width="260" alt="İkon seçimi" />
-      <br><sub><b>Icon Selection</b></sub>
+      <br><sub><b>Payment Edit settings</b></sub>
     </td>
     <td align="center">
       <img src="https://github.com/user-attachments/assets/60718b8f-a146-436d-bac9-9248cb42bcc2" width="260" alt="Hatırlatıcılar" />
-      <br><sub><b>Reminders</b></sub>
+      <br><sub><b>Add Debt & Settings</b></sub>
     </td>
   </tr>
 </table>
