@@ -1,5 +1,4 @@
-<img width="965" height="2048" alt="image" src="https://github.com/user-attachments/assets/a798be10-a5b7-4a14-a0f9-4b35c1c96c61" /><div align="center">
-  <img src="./assets/icon.png" width="112" alt="NoX Finance app icon" />
+<img src="./assets/icon.png" width="112" alt="NoX Finance app icon" />
 
   <h1>NoX Finance</h1>
 
