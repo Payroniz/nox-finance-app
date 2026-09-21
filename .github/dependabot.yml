@@ -5,6 +5,11 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+      - dependency-name: '@babel/core'
+        update-types: [version-update:semver-major]
     groups:
       expo:
         patterns:
@@ -16,6 +21,14 @@ updates:
           - react-native
           - react-native-*
           - '@react-native*/*'
+        # Keep the Expo group to non-breaking updates. Reanimated and
+        # Worklets must be upgraded together because their peer ranges are
+        # tightly coupled and are not reliably selected by Dependabot's
+        # grouped resolver.
+        update-types: [minor, patch]
+        exclude-patterns:
+          - react-native-reanimated
+          - react-native-worklets
       development:
         dependency-type: development
         update-types: [minor, patch]
