@@ -3,14 +3,16 @@ import { ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, router } from 'expo-router';
 import { BorderRadius, Colors, FontSize, Shadow, Spacing } from '../../src/constants/theme';
-import { Debt, Payment } from '../../src/constants/types';
-import { getAllSettings, getDebts, getPayments } from '../../src/db/database';
+import { Debt, Payment, Subscription } from '../../src/constants/types';
+import { getAllSettings, getDebts, getPayments, getSubscriptions } from '../../src/db/database';
 import { formatCurrency, parseLocalDate } from '../../src/utils/helpers';
+import { getMonthlySubscriptionTotals, getSubscriptionOccurrences } from '../../src/utils/subscriptions';
+import { CurrencySelector } from '../../src/components/CurrencySelector';
 
 type FlowItem = {
   id: string;
   entityId: number;
-  kind: 'payment' | 'debt' | 'receivable';
+  kind: 'payment' | 'debt' | 'receivable' | 'subscription';
   title: string;
   date: Date;
   amount: number;
@@ -22,14 +24,16 @@ const HORIZONS = [7, 30, 90] as const;
 export default function PlannerScreen() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [debts, setDebts] = useState<Debt[]>([]);
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [horizon, setHorizon] = useState<(typeof HORIZONS)[number]>(30);
   const [currency, setCurrency] = useState<'TRY' | 'USD' | 'EUR' | 'GBP'>('TRY');
 
   useFocusEffect(useCallback(() => {
-    Promise.all([getPayments(), getDebts(), getAllSettings()]).then(([paymentRows, debtRows, settings]) => {
+    Promise.all([getPayments(), getDebts(), getAllSettings(), getSubscriptions()]).then(([paymentRows, debtRows, settings, subscriptionRows]) => {
       setPayments(paymentRows);
       setDebts(debtRows);
       setCurrency(settings.defaultCurrency);
+      setSubscriptions(subscriptionRows);
     });
   }, []));
 
@@ -39,6 +43,11 @@ export default function PlannerScreen() {
     const end = new Date(start);
     end.setDate(end.getDate() + horizon);
     const items: FlowItem[] = [];
+
+    getSubscriptionOccurrences(subscriptions, start, end).forEach(({ id, date, subscription }) => {
+      items.push({ id, entityId: subscription.id, kind: 'subscription', title: subscription.name,
+        date: parseLocalDate(date)!, amount: subscription.amount, currency: subscription.currency });
+    });
 
     payments.filter(item => item.status !== 'paid').forEach(item => {
       const date = parseLocalDate(item.due_date);
@@ -53,15 +62,17 @@ export default function PlannerScreen() {
         amount: item.total_amount - item.paid_amount, currency: item.currency,
       });
     });
-    return items.sort((a, b) => a.date.getTime() - b.date.getTime());
-  }, [payments, debts, horizon]);
+    return items.filter(item => item.currency === currency).sort((a, b) => a.date.getTime() - b.date.getTime());
+  }, [payments, debts, subscriptions, horizon, currency]);
 
   const outgoing = flow.filter(item => item.kind !== 'receivable').reduce((sum, item) => sum + item.amount, 0);
   const incoming = flow.filter(item => item.kind === 'receivable').reduce((sum, item) => sum + item.amount, 0);
   const net = incoming - outgoing;
   const overdue = flow.filter(item => item.date.getTime() < new Date().setHours(0, 0, 0, 0));
   const health = Math.max(0, Math.min(100, Math.round(100 - (overdue.length * 12) - (outgoing > 0 ? Math.max(0, (outgoing - incoming) / outgoing) * 28 : 0))));
-  const recurring = payments.filter(item => item.status !== 'paid' && item.recurrence !== 'once').reduce((sum, item) => sum + item.amount, 0);
+  const recurring = payments.filter(item => item.currency === currency && item.status !== 'paid' && item.recurrence !== 'once')
+    .reduce((sum, item) => sum + (item.recurrence === 'yearly' ? item.amount / 12 : item.recurrence === 'weekly' ? item.amount * 52 / 12 : item.amount), 0)
+    + (getMonthlySubscriptionTotals(subscriptions)[currency] ?? 0);
 
   return (
     <View style={styles.container}>
@@ -78,6 +89,7 @@ export default function PlannerScreen() {
           </View>
         </View>
 
+        <CurrencySelector value={currency} onChange={setCurrency} />
         <View style={styles.horizonRow}>
           {HORIZONS.map(days => (
             <TouchableOpacity key={days} style={[styles.horizon, horizon === days && styles.horizonActive]} onPress={() => setHorizon(days)}>
@@ -107,7 +119,7 @@ export default function PlannerScreen() {
           <View style={styles.insightCard}>
             <MaterialCommunityIcons name="refresh-auto" size={22} color={Colors.primaryLight} />
             <Text style={styles.insightValue}>{formatCurrency(recurring, currency)}</Text>
-            <Text style={styles.insightLabel}>Düzenli yük</Text>
+            <Text style={styles.insightLabel}>Aylık düzenli yük (tahmini)</Text>
           </View>
           <View style={[styles.insightCard, overdue.length > 0 && { borderColor: `${Colors.danger}80` }]}>
             <MaterialCommunityIcons name="alert-decagram-outline" size={22} color={overdue.length ? Colors.danger : Colors.success} />
@@ -117,7 +129,7 @@ export default function PlannerScreen() {
         </View>
 
         <View style={styles.sectionHeader}>
-          <View><Text style={styles.sectionTitle}>Yaklaşan Akış</Text><Text style={styles.sectionSubtitle}>Ödeme, borç ve alacak tek zaman çizgisinde</Text></View>
+          <View><Text style={styles.sectionTitle}>Yaklaşan Akış</Text><Text style={styles.sectionSubtitle}>Ödeme, abonelik, borç ve alacak bir arada</Text></View>
           <MaterialCommunityIcons name="timeline-clock-outline" size={24} color={Colors.primary} />
         </View>
 
@@ -129,7 +141,8 @@ export default function PlannerScreen() {
               key={item.id}
               style={styles.timelineItem}
               activeOpacity={0.8}
-              onPress={() => item.kind === 'payment' ? router.push(`/payment/${item.entityId}`) : router.push(`/debt/${item.entityId}`)}
+              onPress={() => item.kind === 'subscription' ? router.push({ pathname: '/(tabs)/subscriptions', params: { edit: item.entityId } })
+                : item.kind === 'payment' ? router.push(`/payment/${item.entityId}`) : router.push(`/debt/${item.entityId}`)}
             >
               <View style={styles.timelineRail}>
                 <View style={[styles.timelineDot, { backgroundColor: late ? Colors.danger : positive ? Colors.success : Colors.primary }]} />
@@ -137,7 +150,7 @@ export default function PlannerScreen() {
               </View>
               <View style={styles.timelineContent}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.timelineTitle}>{item.title}</Text>
+                  <Text style={styles.timelineTitle}>{item.title}{item.kind === 'subscription' ? ' • Abonelik' : ''}</Text>
                   <Text style={[styles.timelineDate, late && { color: Colors.danger }]}>{late ? 'Gecikti • ' : ''}{item.date.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', weekday: 'short' })}</Text>
                 </View>
                 <Text style={[styles.timelineAmount, { color: positive ? Colors.success : Colors.textPrimary }]}>{positive ? '+' : '−'}{formatCurrency(item.amount, item.currency)}</Text>

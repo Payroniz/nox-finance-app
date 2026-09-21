@@ -1,7 +1,11 @@
 import { Currency, Subscription, SubscriptionInput } from '../constants/types';
 import { formatLocalDateKey, parseLocalDate } from './helpers';
+import { normalizeHexColor } from './colors';
 
 export const SUBSCRIPTION_CYCLES = { weekly: 'Haftalık', monthly: 'Aylık', yearly: 'Yıllık' };
+export const DEFAULT_SUBSCRIPTION_COLOR = '#2A2A3E';
+export const getDefaultSubscriptionIcon = (name: string): string =>
+  ['youtube', 'spotify', 'netflix'].find(service => name.toLowerCase().includes(service)) ?? 'repeat';
 
 export const validateSubscription = (item: SubscriptionInput): void => {
   const date = typeof item.renewal_date === 'string' ? parseLocalDate(item.renewal_date) : null;
@@ -10,12 +14,37 @@ export const validateSubscription = (item: SubscriptionInput): void => {
     || !['TRY', 'USD', 'EUR', 'GBP'].includes(item.currency)
     || !['weekly', 'monthly', 'yearly'].includes(item.billing_cycle)
     || !date || formatLocalDateKey(date) !== item.renewal_date
-    || ![0, 1].includes(item.active) || typeof item.notes !== 'string') {
+    || ![0, 1].includes(item.active) || typeof item.notes !== 'string'
+    || (item.icon_type !== undefined && !['icon', 'gallery', 'emoji'].includes(item.icon_type))
+    || (item.icon_value !== undefined && (typeof item.icon_value !== 'string' || !item.icon_value.trim()))
+    || (item.color !== undefined && !normalizeHexColor(item.color))) {
     throw new Error('INVALID_SUBSCRIPTION');
   }
 };
 
-// Always calculate from the original billing date so 31 January does not drift to 28 March.
+export type SubscriptionOccurrence = { id: string; date: string; subscription: Subscription };
+
+export const getSubscriptionOccurrences = (
+  items: Subscription[], start: Date, end: Date,
+): SubscriptionOccurrence[] => {
+  const endKey = formatLocalDateKey(end);
+  if (formatLocalDateKey(start) > endKey) return [];
+  return items.filter(item => item.active === 1).flatMap(subscription => {
+    const occurrences: SubscriptionOccurrence[] = [];
+    let date = getNextRenewal(subscription, start);
+    while (date <= endKey) {
+      const nextDay = parseLocalDate(date);
+      if (!nextDay) break;
+      occurrences.push({ id: `subscription-${subscription.id}-${date}`, date, subscription });
+      nextDay.setDate(nextDay.getDate() + 1);
+      const next = getNextRenewal(subscription, nextDay);
+      if (next <= date) break;
+      date = next;
+    }
+    return occurrences;
+  }).sort((a, b) => a.date.localeCompare(b.date) || a.subscription.id - b.subscription.id);
+};
+
 export const getNextRenewal = (item: Pick<Subscription, 'renewal_date' | 'billing_cycle'>, now = new Date()): string => {
   const anchor = parseLocalDate(item.renewal_date);
   if (!anchor) return item.renewal_date;

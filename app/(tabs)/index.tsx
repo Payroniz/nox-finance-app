@@ -11,7 +11,7 @@ import { Card } from '../../src/components/Card';
 import { PaymentCard } from '../../src/components/PaymentCard';
 import {
   getMonthlyStats, getUpcomingPayments, updatePaymentStatus,
-  deletePayment, getAllSettings, getDebts, getPayments
+  deletePayment, getAllSettings, getDebts, getPayments, getSubscriptions,
 } from '../../src/db/database';
 import {
   formatCurrency,
@@ -21,13 +21,16 @@ import {
   getGreeting,
   parseLocalDate,
 } from '../../src/utils/helpers';
-import { Payment } from '../../src/constants/types';
+import { Currency, Payment, Subscription } from '../../src/constants/types';
 import { cancelNotification } from '../../src/utils/notifications';
+import { getNextRenewal, getSubscriptionOccurrences } from '../../src/utils/subscriptions';
+import { CurrencySelector } from '../../src/components/CurrencySelector';
+import { SubscriptionCard } from '../../src/components/SubscriptionCard';
 
 type InAppNotification = {
   id: string;
   entityId: number;
-  route: 'payment' | 'debt';
+  route: 'payment' | 'debt' | 'subscription';
   title: string;
   name: string;
   amount: string;
@@ -41,6 +44,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState<any>(null);
   const [prevStats, setPrevStats] = useState<any>(null);
   const [upcomingPayments, setUpcomingPayments] = useState<Payment[]>([]);
+  const [upcomingSubscriptions, setUpcomingSubscriptions] = useState<Subscription[]>([]);
   const [overduePayments, setOverduePayments] = useState<Payment[]>([]);
   const [userName, setUserName] = useState('Kullanıcı');
   const [refreshing, setRefreshing] = useState(false);
@@ -48,6 +52,7 @@ export default function Dashboard() {
   const [notifications, setNotifications] = useState<InAppNotification[]>([]);
   const [debtSummary, setDebtSummary] = useState({ totalOwe: 0, totalOwed: 0, netDebt: 0 });
   const [currency, setCurrency] = useState<'TRY' | 'USD' | 'EUR' | 'GBP'>('TRY');
+  const [selectedCurrency, setSelectedCurrency] = useState<Currency | null>(null);
 
   const today = new Date();
   const greeting = getGreeting();
@@ -56,12 +61,18 @@ export default function Dashboard() {
     const horizon = new Date();
     horizon.setDate(horizon.getDate() + 7);
     const horizonKey = formatLocalDateKey(horizon);
-    const [payments, oweDebts, owedDebts] = await Promise.all([
+    const [payments, oweDebts, owedDebts, subscriptions] = await Promise.all([
       getPayments(),
       getDebts('owe'),
       getDebts('owed'),
+      getSubscriptions(),
     ]);
     const notifs: InAppNotification[] = [];
+    for (const { id, date, subscription } of getSubscriptionOccurrences(subscriptions, new Date(), horizon)) {
+      notifs.push({ id, entityId: subscription.id, route: 'subscription', title: 'Abonelik yenileniyor', name: subscription.name,
+        amount: formatCurrency(subscription.amount, subscription.currency), detail: `${formatDate(date)} · Abonelik`,
+        color: Colors.info, icon: 'repeat', dueDate: parseLocalDate(date)!.getTime() });
+    }
 
     payments
       .filter(payment => payment.status !== 'paid' && payment.due_date <= horizonKey)
@@ -113,25 +124,29 @@ export default function Dashboard() {
       const prevMonth = now.getMonth() === 0 ? 12 : now.getMonth();
       const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
 
-      const [monthlyStats, prevMonthStats, upcoming, settings, oweDebts, owedDebts, allPayments] = await Promise.all([
-        getMonthlyStats(now.getFullYear(), now.getMonth() + 1),
-        getMonthlyStats(prevYear, prevMonth),
+      const settings = await getAllSettings();
+      const unit = selectedCurrency ?? settings.defaultCurrency;
+      const [monthlyStats, prevMonthStats, upcoming, oweDebts, owedDebts, allPayments, subscriptions] = await Promise.all([
+        getMonthlyStats(now.getFullYear(), now.getMonth() + 1, unit),
+        getMonthlyStats(prevYear, prevMonth, unit),
         getUpcomingPayments(5),
-        getAllSettings(),
         getDebts('owe'),
         getDebts('owed'),
         getPayments(),
+        getSubscriptions(),
       ]);
 
       setStats(monthlyStats);
       setPrevStats(prevMonthStats);
       setUpcomingPayments(upcoming.filter(p => p.status !== 'overdue').slice(0, 3));
+      setUpcomingSubscriptions(subscriptions.filter(item => item.active === 1)
+        .sort((a, b) => getNextRenewal(a).localeCompare(getNextRenewal(b))).slice(0, 3));
       setOverduePayments(allPayments.filter(p => p.status === 'overdue'));
       setUserName(settings.userName);
-      setCurrency(settings.defaultCurrency);
+      setCurrency(unit);
 
-      const totalOwe = oweDebts.reduce((s, d) => s + (d.total_amount - d.paid_amount), 0);
-      const totalOwed = owedDebts.reduce((s, d) => s + (d.total_amount - d.paid_amount), 0);
+      const totalOwe = oweDebts.filter(d => d.currency === unit).reduce((s, d) => s + (d.total_amount - d.paid_amount), 0);
+      const totalOwed = owedDebts.filter(d => d.currency === unit).reduce((s, d) => s + (d.total_amount - d.paid_amount), 0);
       setDebtSummary({ totalOwe, totalOwed, netDebt: totalOwed - totalOwe });
 
       await buildNotifications();
@@ -140,7 +155,7 @@ export default function Dashboard() {
     }
   };
 
-  useFocusEffect(useCallback(() => { loadData(); }, []));
+  useFocusEffect(useCallback(() => { loadData(); }, [selectedCurrency]));
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -224,10 +239,11 @@ export default function Dashboard() {
           </TouchableOpacity>
         )}
 
+        <CurrencySelector value={selectedCurrency ?? currency} onChange={setSelectedCurrency} />
         {/* ── HERO CARD ── */}
         <View style={styles.heroCard}>
           <View style={styles.heroTop}>
-            <Text style={styles.heroLabel}>Bu Ay Toplam Harcama</Text>
+            <Text style={styles.heroLabel}>Bu Ay Toplam Gider</Text>
             {monthChange !== null && (
               <View style={[styles.changePill, { backgroundColor: monthChange > 0 ? `${Colors.danger}25` : `${Colors.success}25` }]}>
                 <MaterialCommunityIcons
@@ -245,13 +261,14 @@ export default function Dashboard() {
           <Text style={styles.heroAmount}>
             {stats ? formatCurrency(stats.totalExpense, currency) : '—'}
           </Text>
+          <Text style={styles.heroLabel}>{stats?.subscriptionCount ?? 0} abonelik yenilemesi • {formatCurrency(stats?.subscriptionExpense ?? 0, currency)} dahil</Text>
 
           {/* Completion bar */}
           <View style={styles.completionRow}>
             <View style={styles.completionBarTrack}>
               <View style={[styles.completionBarFill, { width: `${completionRate}%` }]} />
             </View>
-            <Text style={styles.completionPct}>{completionRate}% ödendi</Text>
+            <Text style={styles.completionPct}>Ödemeler: %{completionRate}</Text>
           </View>
 
           <View style={styles.heroStats}>
@@ -297,7 +314,7 @@ export default function Dashboard() {
           <View style={{ flex: 1 }}>
             <Text style={styles.plannerEyebrow}>YENİ • AKILLI FİNANS PLANI</Text>
             <Text style={styles.plannerTitle}>Önündeki 90 günü gör</Text>
-            <Text style={styles.plannerText}>Ödeme, borç ve alacakları tek nakit akışında keşfet.</Text>
+            <Text style={styles.plannerText}>Ödeme, abonelik, borç ve alacakları tek akışta keşfet.</Text>
           </View>
           <MaterialCommunityIcons name="arrow-top-right" size={21} color={Colors.primaryLight} />
         </TouchableOpacity>
@@ -393,7 +410,7 @@ export default function Dashboard() {
           <Card style={styles.emptyCard}>
             <MaterialCommunityIcons name="calendar-check" size={36} color={Colors.success} />
             <Text style={styles.emptyTitle}>Yaklaşan ödeme yok</Text>
-            <Text style={styles.emptySubtitle}>Tüm ödemeleriniz güncel 🎉</Text>
+            <Text style={styles.emptySubtitle}>{upcomingSubscriptions.length ? 'Abonelik yenilemelerini aşağıda görebilirsin.' : 'Kayıtlı ödemeleriniz güncel 🎉'}</Text>
           </Card>
         ) : (
           upcomingPayments.map(p => (
@@ -407,11 +424,19 @@ export default function Dashboard() {
           ))
         )}
 
+        {upcomingSubscriptions.length > 0 && <>
+          <View style={[styles.sectionHeader, { marginVertical: Spacing.md }]}>
+            <Text style={styles.sectionTitle}>Yaklaşan Abonelikler</Text>
+            <TouchableOpacity onPress={() => router.push('/(tabs)/subscriptions')}><Text style={styles.seeAll}>Tümü →</Text></TouchableOpacity>
+          </View>
+          {upcomingSubscriptions.map(item => <SubscriptionCard key={item.id} item={item}
+            onPress={() => router.push({ pathname: '/(tabs)/subscriptions', params: { edit: item.id } })} />)}
+        </>}
         {/* ── WEEKLY SPARKLINE ── */}
         {stats?.weeklyData && (
           <Card style={[styles.sectionCard, { marginTop: Spacing.lg }]}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Bu Hafta</Text>
+              <Text style={styles.sectionTitle}>Günlere Göre Gider</Text>
               <Text style={styles.weekTotal}>
                 {formatCurrency(stats.weeklyData.reduce((s: number, d: any) => s + d.amount, 0), currency)}
               </Text>
@@ -476,7 +501,8 @@ export default function Dashboard() {
                     activeOpacity={0.78}
                     onPress={() => {
                       setShowNotifPanel(false);
-                      router.push(n.route === 'payment' ? `/payment/${n.entityId}` : `/debt/${n.entityId}`);
+                      if (n.route === 'subscription') router.push({ pathname: '/(tabs)/subscriptions', params: { edit: n.entityId } });
+                      else router.push(n.route === 'payment' ? `/payment/${n.entityId}` : `/debt/${n.entityId}`);
                     }}
                   >
                     <View style={[styles.notifItemIcon, { backgroundColor: `${n.color}1F` }]}>

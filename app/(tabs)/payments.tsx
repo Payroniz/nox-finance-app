@@ -8,11 +8,13 @@ import { useFocusEffect, router } from 'expo-router';
 import { Colors, Spacing, BorderRadius, FontSize, Shadow } from '../../src/constants/theme';
 import { PaymentCard } from '../../src/components/PaymentCard';
 import {
-  getPaymentsByDate, getMarkedDates, updatePaymentStatus, deletePayment, getPayments
+  getPaymentsByDate, getMarkedDates, updatePaymentStatus, deletePayment, getPayments, getSubscriptions,
 } from '../../src/db/database';
 import { formatCurrency, getTodayString } from '../../src/utils/helpers';
 import { cancelNotification } from '../../src/utils/notifications';
-import { Payment } from '../../src/constants/types';
+import { Currency, Payment, Subscription } from '../../src/constants/types';
+import { getSubscriptionOccurrences } from '../../src/utils/subscriptions';
+import { SubscriptionCard } from '../../src/components/SubscriptionCard';
 
 LocaleConfig.locales['tr'] = {
   monthNames: ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'],
@@ -33,15 +35,18 @@ export default function PaymentsScreen() {
   const [currentMonth, setCurrentMonth] = useState({ year: new Date().getFullYear(), month: new Date().getMonth() + 1 });
   const [allPayments, setAllPayments] = useState<Payment[]>([]);
   const [allPage, setAllPage] = useState(1);
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
 
   const loadPayments = async () => {
-    const [dayPayments, marks, all] = await Promise.all([
+    const [dayPayments, marks, all, subscriptionRows] = await Promise.all([
       getPaymentsByDate(selectedDate),
       getMarkedDates(currentMonth.year, currentMonth.month),
       getPayments(),
+      getSubscriptions(),
     ]);
     setPayments(dayPayments);
     setAllPayments(all);
+    setSubscriptions(subscriptionRows);
     setMarkedDates({
       ...marks,
       [selectedDate]: {
@@ -78,7 +83,15 @@ export default function PaymentsScreen() {
   const totalAllPages = Math.max(1, Math.ceil(allPayments.length / PAGE_SIZE));
   const pagedPayments = allPayments.slice((allPage - 1) * PAGE_SIZE, allPage * PAGE_SIZE);
   const pendingPayments = allPayments.filter(item => item.status !== 'paid');
-  const pendingTotal = pendingPayments.reduce((sum, item) => sum + item.amount, 0);
+  const pendingTotals = pendingPayments.reduce<Partial<Record<Currency, number>>>((totals, item) => {
+    totals[item.currency] = (totals[item.currency] ?? 0) + item.amount; return totals;
+  }, {});
+  const selectedDay = new Date(`${selectedDate}T00:00:00`);
+  const daySubscriptions = getSubscriptionOccurrences(subscriptions, selectedDay, selectedDay);
+  const dayTotals = [...payments, ...daySubscriptions.map(item => item.subscription)]
+    .reduce<Partial<Record<Currency, number>>>((totals, item) => {
+      totals[item.currency] = (totals[item.currency] ?? 0) + item.amount; return totals;
+    }, {});
   const overdueCount = allPayments.filter(item => item.status === 'overdue').length;
 
   return (
@@ -102,7 +115,8 @@ export default function PaymentsScreen() {
             <View style={styles.commandCard}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.commandEyebrow}>ÖDEME KONTROL MERKEZİ</Text>
-                <Text style={styles.commandAmount}>{formatCurrency(pendingTotal, 'TRY')}</Text>
+                {(Object.keys(pendingTotals).length ? Object.entries(pendingTotals) : [['TRY', 0] as const]).map(([unit, total]) =>
+                  <Text key={unit} style={styles.commandAmount}>{formatCurrency(total ?? 0, unit as Currency)}</Text>)}
                 <Text style={styles.commandCaption}>bekleyen toplam • {pendingPayments.length} kayıt</Text>
               </View>
               <View style={[styles.riskBubble, { backgroundColor: overdueCount ? `${Colors.danger}22` : `${Colors.success}22` }]}>
@@ -145,8 +159,14 @@ export default function PaymentsScreen() {
             {/* Selected day header */}
             <View style={styles.dayHeader}>
               <Text style={styles.dayTitle}>{selectedDateFormatted}</Text>
-              <Text style={styles.dayCount}>{payments.length} ödeme</Text>
+              <Text style={styles.dayCount}>{payments.length} ödeme • {daySubscriptions.length} abonelik</Text>
             </View>
+            {daySubscriptions.map(({ id, date, subscription }) => <View key={id} style={styles.listItem}>
+              <SubscriptionCard item={subscription} date={date} onPress={() => router.push({ pathname: '/(tabs)/subscriptions', params: { edit: subscription.id } })} />
+            </View>)}
+            {Object.entries(dayTotals).map(([unit, total]) => <View key={unit} style={styles.listItem}>
+              <Text style={styles.dayCount}>Günlük toplam: {formatCurrency(total ?? 0, unit as Currency)}</Text>
+            </View>)}
           </>
         }
         renderItem={({ item }) => (
@@ -159,7 +179,7 @@ export default function PaymentsScreen() {
             />
           </View>
         )}
-        ListEmptyComponent={() => (
+        ListEmptyComponent={() => daySubscriptions.length ? null : (
           <View style={styles.emptyContainer}>
             <MaterialCommunityIcons name="calendar-blank" size={48} color={Colors.textMuted} />
             <Text style={styles.emptyTitle}>Bu günde ödeme yok</Text>

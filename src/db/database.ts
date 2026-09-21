@@ -1,7 +1,9 @@
 import * as SQLite from 'expo-sqlite';
 import { Payment, Debt, DebtPayment, Category, Settings, AppSettings, Currency, BackupDestination, BackupFrequency, UploadedIcon, Subscription, SubscriptionInput } from '../constants/types';
 import { formatLocalDateKey, parseLocalDate } from '../utils/helpers';
-import { validateSubscription } from '../utils/subscriptions';
+import { DEFAULT_SUBSCRIPTION_COLOR, getDefaultSubscriptionIcon, getSubscriptionOccurrences, validateSubscription } from '../utils/subscriptions';
+import { calculateMonthlyStats } from '../utils/expenses';
+import { normalizeHexColor } from '../utils/colors';
 
 const DATABASE_NAME = 'nox.db';
 
@@ -110,6 +112,18 @@ export const initializeDatabase = async (): Promise<void> => {
 };
 
 const migrateSchema = async (database: SQLite.SQLiteDatabase): Promise<void> => {
+  const subscriptionColumns = await database.getAllAsync<{ name: string }>('PRAGMA table_info(subscriptions)');
+  for (const [name, fallback] of [['icon_type', 'icon'], ['icon_value', 'repeat'], ['color', DEFAULT_SUBSCRIPTION_COLOR]]) {
+    if (!subscriptionColumns.some(column => column.name === name)) {
+      await database.execAsync(`ALTER TABLE subscriptions ADD COLUMN ${name} TEXT NOT NULL DEFAULT '${fallback}'`);
+      if (name === 'icon_value') {
+        await database.execAsync(`UPDATE subscriptions SET icon_value = CASE
+          WHEN lower(name) LIKE '%youtube%' THEN 'youtube'
+          WHEN lower(name) LIKE '%spotify%' THEN 'spotify'
+          WHEN lower(name) LIKE '%netflix%' THEN 'netflix' ELSE 'repeat' END`);
+      }
+    }
+  }
   const paymentColumns = await database.getAllAsync<{ name: string }>('PRAGMA table_info(payments)');
   if (!paymentColumns.some(column => column.name === 'reminder_days')) {
     await database.execAsync("ALTER TABLE payments ADD COLUMN reminder_days TEXT DEFAULT '[]'");
@@ -233,11 +247,12 @@ export const getSubscriptions = async (): Promise<Subscription[]> =>
 export const saveSubscription = async (item: SubscriptionInput, id?: number): Promise<void> => {
   validateSubscription(item);
   const database = await getDatabase();
-  const values = [item.name.trim(), item.amount, item.currency, item.billing_cycle, item.renewal_date, item.active, item.notes.trim()];
+  const values = [item.name.trim(), item.amount, item.currency, item.billing_cycle, item.renewal_date, item.active, item.notes.trim(),
+    item.icon_type ?? 'icon', item.icon_value ?? getDefaultSubscriptionIcon(item.name), normalizeHexColor(item.color) ?? DEFAULT_SUBSCRIPTION_COLOR];
   if (id !== undefined) {
-    await database.runAsync('UPDATE subscriptions SET name = ?, amount = ?, currency = ?, billing_cycle = ?, renewal_date = ?, active = ?, notes = ? WHERE id = ?', [...values, id]);
+    await database.runAsync('UPDATE subscriptions SET name = ?, amount = ?, currency = ?, billing_cycle = ?, renewal_date = ?, active = ?, notes = ?, icon_type = ?, icon_value = ?, color = ? WHERE id = ?', [...values, id]);
   } else {
-    await database.runAsync('INSERT INTO subscriptions (name, amount, currency, billing_cycle, renewal_date, active, notes) VALUES (?, ?, ?, ?, ?, ?, ?)', values);
+    await database.runAsync('INSERT INTO subscriptions (name, amount, currency, billing_cycle, renewal_date, active, notes, icon_type, icon_value, color) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', values);
   }
 };
 
@@ -311,7 +326,7 @@ export const deletePayment = async (id: number): Promise<void> => {
 };
 
 export const getMarkedDates = async (year: number, month: number): Promise<Record<string, any>> => {
-  const payments = await getPaymentsByMonth(year, month);
+  const [payments, subscriptions] = await Promise.all([getPaymentsByMonth(year, month), getSubscriptions()]);
   const marked: Record<string, any> = {};
 
   for (const p of payments) {
@@ -323,6 +338,12 @@ export const getMarkedDates = async (year: number, month: number): Promise<Recor
     marked[date].dots.push({ color });
   }
 
+  for (const item of getSubscriptionOccurrences(subscriptions, new Date(year, month - 1, 1), new Date(year, month, 0))) {
+    if (!marked[item.date]) marked[item.date] = { dots: [] };
+    if (!marked[item.date].dots.some((dot: { key?: string }) => dot.key === 'subscriptions')) {
+      marked[item.date].dots.push({ key: 'subscriptions', color: '#26C6DA' });
+    }
+  }
   return marked;
 };
 
@@ -493,44 +514,12 @@ export const getAllSettings = async (): Promise<AppSettings> => {
   };
 };
 
-export const getMonthlyStats = async (year: number, month: number) => {
-  const database = await getDatabase();
-  const monthStr = String(month).padStart(2, '0');
-  const prefix = `${year}-${monthStr}`;
-
-  const payments = await database.getAllAsync<Payment>(
-    "SELECT * FROM payments WHERE strftime('%Y-%m', due_date) = ?",
-    [prefix]
-  );
-
-  const totalExpense = payments.reduce((sum, p) => sum + p.amount, 0);
-  const paidCount = payments.filter(p => p.status === 'paid').length;
-  const pendingCount = payments.filter(p => p.status === 'pending').length;
-  const overdueCount = payments.filter(p => p.status === 'overdue').length;
-
-  const catMap: Record<string, number> = {};
-  for (const p of payments) {
-    catMap[p.category] = (catMap[p.category] || 0) + p.amount;
-  }
-
-  const categories = await getCategories();
-  const categoryBreakdown = Object.entries(catMap).map(([cat, amount]) => {
-    const catObj = categories.find(c => c.name === cat);
-    return { category: cat, amount, color: catObj?.color ?? '#78909C' };
-  });
-
-  const weekDays = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
-  const weeklyData = weekDays.map((day, i) => ({
-    day,
-    amount: payments
-      .filter(p => {
-        const date = parseLocalDate(p.due_date);
-        return date?.getDay() === (i + 1) % 7;
-      })
-      .reduce((sum, p) => sum + p.amount, 0),
-  }));
-
-  return { totalExpense, paidCount, pendingCount, overdueCount, categoryBreakdown, weeklyData };
+export const getMonthlyStats = async (year: number, month: number, currency?: Currency) => {
+  const [payments, subscriptions, categories, unit] = await Promise.all([
+    getPaymentsByMonth(year, month), getSubscriptions(), getCategories(),
+    currency ?? getAllSettings().then(settings => settings.defaultCurrency),
+  ]);
+  return calculateMonthlyStats(payments, subscriptions, categories, year, month, unit);
 };
 
 export const exportData = async () => {
@@ -547,7 +536,7 @@ export const exportData = async () => {
 
   return JSON.stringify({
     format: 'nox-finance-backup',
-    version: 5,
+    version: 6,
     exportedAt: new Date().toISOString(),
     payments,
     debts,
@@ -567,7 +556,6 @@ export const importData = async (raw: string): Promise<void> => {
   const categories = parsed.categories;
   const settings = parsed.settings;
   const uploadedIcons = Array.isArray(parsed.uploadedIcons) ? parsed.uploadedIcons : [];
-  // Versions before 5 did not contain subscriptions.
   if (parsed.subscriptions !== undefined && !Array.isArray(parsed.subscriptions)) throw new Error('INVALID_BACKUP');
   const subscriptions = (parsed.subscriptions ?? []) as Subscription[];
   for (const item of subscriptions) {
@@ -603,8 +591,9 @@ export const importData = async (raw: string): Promise<void> => {
 
     for (const item of subscriptions) {
       await transaction.runAsync(
-        'INSERT INTO subscriptions (id, name, amount, currency, billing_cycle, renewal_date, active, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [item.id, item.name.trim(), item.amount, item.currency, item.billing_cycle, item.renewal_date, item.active, item.notes, item.created_at ?? new Date().toISOString()]
+        'INSERT INTO subscriptions (id, name, amount, currency, billing_cycle, renewal_date, active, notes, created_at, icon_type, icon_value, color) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [item.id, item.name.trim(), item.amount, item.currency, item.billing_cycle, item.renewal_date, item.active, item.notes, item.created_at ?? new Date().toISOString(),
+          item.icon_type ?? 'icon', item.icon_value ?? getDefaultSubscriptionIcon(item.name), normalizeHexColor(item.color) ?? DEFAULT_SUBSCRIPTION_COLOR]
       );
     }
 

@@ -18,6 +18,9 @@ export interface Subscription {
   active: number;
   notes: string;
   created_at: string;
+  icon_type: IconType;
+  icon_value: string;
+  color: string;
 }
 export type SubscriptionInput = Omit<Subscription, 'id' | 'created_at'>;
 
@@ -107,6 +110,8 @@ export interface AppSettings {
 
 export interface MonthlyStats {
   totalExpense: number;
+  subscriptionExpense: number;
+  subscriptionCount: number;
   paidCount: number;
   pendingCount: number;
   overdueCount: number;

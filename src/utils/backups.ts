@@ -61,6 +61,9 @@ const createPortableBackup = async (): Promise<string> => {
   for (const payment of parsed.payments ?? []) {
     if (payment.icon_type === 'gallery') addUri(mediaUris, payment.icon_value);
   }
+  for (const subscription of parsed.subscriptions ?? []) {
+    if (subscription.icon_type === 'gallery') addUri(mediaUris, subscription.icon_value);
+  }
   for (const debt of parsed.debts ?? []) {
     addUri(mediaUris, debt.person_photo);
     if (debt.icon_type === 'gallery') addUri(mediaUris, debt.icon_value);
@@ -78,7 +81,7 @@ const createPortableBackup = async (): Promise<string> => {
   }
   parsed.mediaAssets = mediaAssets;
   parsed.mediaIncluded = mediaAssets.length;
-  parsed.version = 5;
+  parsed.version = 6;
   return JSON.stringify(parsed, null, 2);
 };
 
@@ -122,7 +125,6 @@ const readConfiguredEntries = async (): Promise<BackupEntry[]> => {
 
 export const cleanupTemporaryBackups = async (all = false): Promise<void> => {
   for (const file of Paths.cache.list()) {
-    // A share receiver may still be reading the file after the sheet closes.
     if (file instanceof File && BACKUP_PATTERN.test(file.name)
       && (all || (file.modificationTime !== null && Date.now() - file.modificationTime > 86400000))) {
       if (all) file.delete();
@@ -147,7 +149,6 @@ export const configureBackupDestination = async (destination: BackupDestination,
     return 'Her yedekte paylaşım ekranı';
   }
   const directory = await Directory.pickDirectoryAsync();
-  // Verify read/write access before replacing a working destination.
   const probe = directory.createFile(`nox-access-check-${Date.now()}.txt`, 'text/plain');
   try {
     probe.write('NoX');
@@ -179,7 +180,6 @@ const writeLocalBackup = async (): Promise<string> => {
     throw error;
   }
   await setSetting('lastBackupAt', new Date().toISOString());
-  // Retention failures must not turn a successfully saved backup into an error.
   try {
     const files = await readConfiguredEntries();
     for (const entry of files.slice(MAX_AUTOMATIC_BACKUPS)) {

@@ -23,3 +23,13 @@ This file records user-facing changes to NoX Finance. Source history for earlier
 - Enlarged the splash screen logo and NoX wordmark together.
 - Adjusted the bottom navigation height to accommodate labels and the device's bottom safe area.
 - Updated the app version to 3.1.8 and the local Android versionCode to 5, with automatic build number increments for EAS preview and production builds.
+
+---
+
+## v3.1.9 - 2026-09-21
+
+### Added
+
+- A color customization feature has been added to subscription cards
+- You can now choose the image for your subscription cards from both your local files and the pre-installed icons.
+- 

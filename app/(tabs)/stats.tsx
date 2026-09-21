@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar
 } from 'react-native';
@@ -6,8 +6,10 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
 import { Colors, Spacing, BorderRadius, FontSize } from '../../src/constants/theme';
 import { Card } from '../../src/components/Card';
-import { getMonthlyStats, getDebts, getPayments } from '../../src/db/database';
+import { getMonthlyStats, getDebts, getPaymentsByMonth, getAllSettings } from '../../src/db/database';
 import { formatCurrency } from '../../src/utils/helpers';
+import { Currency, MonthlyStats } from '../../src/constants/types';
+import { CurrencySelector } from '../../src/components/CurrencySelector';
 
 const MONTHS = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 
@@ -15,33 +17,35 @@ export default function StatsScreen() {
   const now = new Date();
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
-  const [stats, setStats] = useState<any>(null);
-  const [previousStats, setPreviousStats] = useState<any>(null);
+  const [stats, setStats] = useState<MonthlyStats | null>(null);
+  const [previousStats, setPreviousStats] = useState<MonthlyStats | null>(null);
+  const [currency, setCurrency] = useState<Currency>('TRY');
+  useEffect(() => { void getAllSettings().then(settings => setCurrency(settings.defaultCurrency)); }, []);
   const [debtStats, setDebtStats] = useState({ totalOwe: 0, totalOwed: 0 });
   const [paymentStats, setPaymentStats] = useState({ totalPaid: 0, totalPending: 0, paidCount: 0, pendingCount: 0 });
 
   useFocusEffect(useCallback(() => {
     loadStats();
-  }, [selectedYear, selectedMonth]));
+  }, [selectedYear, selectedMonth, currency]));
 
   const loadStats = async () => {
     const previousMonth = selectedMonth === 1 ? 12 : selectedMonth - 1;
     const previousYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear;
     const [monthly, previous, oweDebts, owedDebts, allPayments] = await Promise.all([
-      getMonthlyStats(selectedYear, selectedMonth),
-      getMonthlyStats(previousYear, previousMonth),
+      getMonthlyStats(selectedYear, selectedMonth, currency),
+      getMonthlyStats(previousYear, previousMonth, currency),
       getDebts('owe'),
       getDebts('owed'),
-      getPayments(),
+      getPaymentsByMonth(selectedYear, selectedMonth),
     ]);
     setStats(monthly);
     setPreviousStats(previous);
     setDebtStats({
-      totalOwe: oweDebts.reduce((s, d) => s + (d.total_amount - d.paid_amount), 0),
-      totalOwed: owedDebts.reduce((s, d) => s + (d.total_amount - d.paid_amount), 0),
+      totalOwe: oweDebts.filter(d => d.currency === currency).reduce((s, d) => s + (d.total_amount - d.paid_amount), 0),
+      totalOwed: owedDebts.filter(d => d.currency === currency).reduce((s, d) => s + (d.total_amount - d.paid_amount), 0),
     });
-    const paid = allPayments.filter(p => p.status === 'paid');
-    const pending = allPayments.filter(p => p.status !== 'paid');
+    const paid = allPayments.filter(p => p.currency === currency && p.status === 'paid');
+    const pending = allPayments.filter(p => p.currency === currency && p.status !== 'paid');
     setPaymentStats({
       totalPaid: paid.reduce((s, p) => s + p.amount, 0),
       totalPending: pending.reduce((s, p) => s + p.amount, 0),
@@ -66,10 +70,11 @@ export default function StatsScreen() {
 
   const maxWeekly = stats?.weeklyData ? Math.max(...stats.weeklyData.map((d: any) => d.amount), 1) : 1;
   const recordCount = (stats?.paidCount ?? 0) + (stats?.pendingCount ?? 0) + (stats?.overdueCount ?? 0);
-  const averagePayment = recordCount ? (stats?.totalExpense ?? 0) / recordCount : 0;
+  const expenseCount = recordCount + (stats?.subscriptionCount ?? 0);
+  const averagePayment = expenseCount ? (stats?.totalExpense ?? 0) / expenseCount : 0;
   const topCategory = [...(stats?.categoryBreakdown ?? [])].sort((a: any, b: any) => b.amount - a.amount)[0];
-  const monthDelta = previousStats?.totalExpense > 0
-    ? ((stats?.totalExpense - previousStats.totalExpense) / previousStats.totalExpense) * 100
+  const monthDelta = previousStats && previousStats.totalExpense > 0
+    ? (((stats?.totalExpense ?? 0) - previousStats.totalExpense) / previousStats.totalExpense) * 100
     : null;
   const paymentHealth = recordCount ? Math.round(((stats?.paidCount ?? 0) / recordCount) * 100) : 100;
 
@@ -90,6 +95,7 @@ export default function StatsScreen() {
           </View>
         </View>
 
+        <CurrencySelector value={currency} onChange={setCurrency} />
         {/* Month selector */}
         <View style={styles.monthSelector}>
           <TouchableOpacity onPress={prevMonth} style={styles.arrowBtn}>
@@ -103,8 +109,9 @@ export default function StatsScreen() {
 
         {/* Total summary */}
         <Card style={[styles.totalCard, { backgroundColor: Colors.primary }]}>
-          <Text style={styles.totalLabel}>Toplam Harcama</Text>
-          <Text style={styles.totalAmount}>{formatCurrency(stats?.totalExpense ?? 0, 'TRY')}</Text>
+          <Text style={styles.totalLabel}>Toplam Gider</Text>
+          <Text style={styles.totalAmount}>{formatCurrency(stats?.totalExpense ?? 0, currency)}</Text>
+          <Text style={styles.statusText}>{stats?.subscriptionCount ?? 0} abonelik yenilemesi • {formatCurrency(stats?.subscriptionExpense ?? 0, currency)} dahil</Text>
           {monthDelta !== null ? (
             <View style={styles.deltaPill}>
               <MaterialCommunityIcons name={monthDelta > 0 ? 'trending-up' : 'trending-down'} size={14} color={monthDelta > 0 ? Colors.warning : Colors.success} />
@@ -132,8 +139,8 @@ export default function StatsScreen() {
         <View style={styles.metricGrid}>
           <View style={styles.metricCard}>
             <View style={[styles.metricIcon, { backgroundColor: `${Colors.info}18` }]}><MaterialCommunityIcons name="calculator-variant-outline" size={20} color={Colors.info} /></View>
-            <Text style={styles.metricLabel}>Ortalama ödeme</Text>
-            <Text style={styles.metricValue}>{formatCurrency(averagePayment, 'TRY')}</Text>
+            <Text style={styles.metricLabel}>Ortalama gider</Text>
+            <Text style={styles.metricValue}>{formatCurrency(averagePayment, currency)}</Text>
           </View>
           <View style={styles.metricCard}>
             <View style={[styles.metricIcon, { backgroundColor: `${Colors.primary}18` }]}><MaterialCommunityIcons name="crown-outline" size={20} color={Colors.primaryLight} /></View>
@@ -149,12 +156,12 @@ export default function StatsScreen() {
 
         {/* Weekly trend */}
         <Card style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Haftalık Trend</Text>
+          <Text style={styles.sectionTitle}>Günlere Göre Gider</Text>
           <View style={styles.weeklyChart}>
             {(stats?.weeklyData ?? []).map((d: any, i: number) => (
               <View key={i} style={styles.weekBarCol}>
                 <Text style={styles.weekAmount}>
-                  {d.amount > 0 ? `${Math.round(d.amount / 1000)}K` : ''}
+                  {d.amount >= 1000 ? `${(d.amount / 1000).toFixed(1)}K` : d.amount > 0 ? Math.round(d.amount) : ''}
                 </Text>
                 <View style={styles.weekBarTrack}>
                   <View style={[
@@ -180,7 +187,7 @@ export default function StatsScreen() {
                   <View style={[styles.catDot, { backgroundColor: cat.color }]} />
                   <Text style={styles.catName} numberOfLines={1}>{cat.category}</Text>
                   <Text style={[styles.catAmt, { color: cat.color }]}>
-                    {formatCurrency(cat.amount, 'TRY')}
+                    {formatCurrency(cat.amount, currency)}
                   </Text>
                 </View>
                 <View style={styles.catBarTrack}>
@@ -202,7 +209,7 @@ export default function StatsScreen() {
               <MaterialCommunityIcons name="arrow-up-circle" size={32} color={Colors.danger} />
               <Text style={styles.debtLabel}>Borcum</Text>
               <Text style={[styles.debtAmount, { color: Colors.danger }]}>
-                {formatCurrency(debtStats.totalOwe, 'TRY')}
+                {formatCurrency(debtStats.totalOwe, currency)}
               </Text>
             </View>
             <View style={styles.debtDivider} />
@@ -210,7 +217,7 @@ export default function StatsScreen() {
               <MaterialCommunityIcons name="arrow-down-circle" size={32} color={Colors.success} />
               <Text style={styles.debtLabel}>Alacağım</Text>
               <Text style={[styles.debtAmount, { color: Colors.success }]}>
-                {formatCurrency(debtStats.totalOwed, 'TRY')}
+                {formatCurrency(debtStats.totalOwed, currency)}
               </Text>
             </View>
           </View>
@@ -221,7 +228,7 @@ export default function StatsScreen() {
             <Text style={[styles.netAmount, {
               color: debtStats.totalOwed - debtStats.totalOwe >= 0 ? Colors.success : Colors.danger
             }]}>
-              {formatCurrency(Math.abs(debtStats.totalOwed - debtStats.totalOwe), 'TRY')}
+              {formatCurrency(Math.abs(debtStats.totalOwed - debtStats.totalOwe), currency)}
               {debtStats.totalOwed - debtStats.totalOwe >= 0 ? ' alacaklı' : ' borçlu'}
             </Text>
           </View>
@@ -229,13 +236,14 @@ export default function StatsScreen() {
 
         {/* Toplam Ödemeler */}
         <Card style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Toplam Ödemeler</Text>
+          <Text style={styles.sectionTitle}>Seçilen Ayın Giderleri</Text>
+          <Text style={styles.debtSubLabel}>Abonelik yenilemeleri: {formatCurrency(stats?.subscriptionExpense ?? 0, currency)}</Text>
           <View style={styles.debtCompare}>
             <View style={styles.debtItem}>
               <MaterialCommunityIcons name="check-circle" size={32} color={Colors.success} />
               <Text style={styles.debtLabel}>Ödenen</Text>
               <Text style={[styles.debtAmount, { color: Colors.success }]}>
-                {formatCurrency(paymentStats.totalPaid, 'TRY')}
+                {formatCurrency(paymentStats.totalPaid, currency)}
               </Text>
               <Text style={styles.debtSubLabel}>{paymentStats.paidCount} ödeme</Text>
             </View>
@@ -244,7 +252,7 @@ export default function StatsScreen() {
               <MaterialCommunityIcons name="clock-outline" size={32} color={Colors.primary} />
               <Text style={styles.debtLabel}>Bekleyen</Text>
               <Text style={[styles.debtAmount, { color: Colors.primary }]}>
-                {formatCurrency(paymentStats.totalPending, 'TRY')}
+                {formatCurrency(paymentStats.totalPending, currency)}
               </Text>
               <Text style={styles.debtSubLabel}>{paymentStats.pendingCount} ödeme</Text>
             </View>
@@ -254,11 +262,12 @@ export default function StatsScreen() {
             <Text style={[styles.netAmount, {
               color: paymentStats.totalPaid >= paymentStats.totalPending ? Colors.success : Colors.primary
             }]}>
-              {formatCurrency(paymentStats.totalPaid + paymentStats.totalPending, 'TRY')} toplam
+              {formatCurrency(stats?.totalExpense ?? 0, currency)} toplam
             </Text>
           </View>
         </Card>
 
+        <Text style={styles.noData}>Aktif abonelikler yenileme tarihlerindeki tutarlarıyla giderlere dahildir. Aboneliklerin ödeme durumu takip edilmediği için tamamlama oranı yalnızca ödeme kayıtlarını kapsar.</Text>
         <View style={{ height: 32 }} />
       </ScrollView>
     </View>
