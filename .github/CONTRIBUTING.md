@@ -25,6 +25,7 @@ npm start
 ## Validating Changes
 
 ```bash
+npm run check:dependencies
 npm run lint
 npm run typecheck
 npm test
@@ -45,5 +46,5 @@ Describe the problem, the resulting behavior, and the checks you ran. Include sc
 ## GitHub Automation
 
 - `lint.yml`: Runs ESLint, TypeScript checks, regression tests, and Android JavaScript bundling on pushes to `main` and pull requests targeting it. It does not build an APK.
-- Dependabot: Proposes npm and GitHub Actions updates weekly. It does not merge them automatically.
+- Dependabot: Proposes npm lockfile and GitHub Actions updates weekly. npm updates stay within the version ranges in `package.json`, so exact Expo-managed native versions cannot be upgraded independently. React, React Native, Reanimated, and Worklets stay in the Expo group together with the other SDK packages. For SDK/native upgrades, update Expo, run `npx expo install --fix`, and commit both manifests after all checks pass. It does not merge updates automatically.
 - `stale.yml`: Marks issues and pull requests after 14 days of inactivity and closes them after another 7 days without activity. Assigned items, draft pull requests, and items labeled `security`, `bug`, or `keep-open` are exempt.
