@@ -11,7 +11,6 @@ export default tseslint.config(
     files: ['**/*.{ts,tsx}'],
     extends: [tseslint.configs.recommended],
     rules: {
-      // Existing screens use dynamic icon names and legacy backup payloads.
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', caughtErrors: 'none', ignoreRestSiblings: true }],
     },
