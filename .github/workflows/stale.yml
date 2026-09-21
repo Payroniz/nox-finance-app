@@ -1,4 +1,4 @@
-name: NoX Finance - Hareketsiz Konular
+name: NoX Finance - Stale Issues and Pull Requests
 
 on:
   schedule:
@@ -22,8 +22,8 @@ jobs:
         with:
           days-before-stale: 14
           days-before-close: 7
-          stale-issue-label: hareketsiz
-          stale-pr-label: hareketsiz
+          stale-issue-label: stale
+          stale-pr-label: stale
           exempt-issue-labels: security,bug,keep-open
           exempt-pr-labels: security,bug,keep-open
           exempt-all-assignees: true
@@ -31,13 +31,15 @@ jobs:
           remove-stale-when-updated: true
           operations-per-run: 30
           stale-issue-message: >
-            Bu NoX Finance konusu 14 gündür etkinlik olmadığı için "hareketsiz" olarak işaretlendi.
-            Sorun devam ediyorsa uygulama/cihaz sürümünü ve sonucu kişisel veri paylaşmadan güncelleyin.
-            7 gün içinde yeni etkinlik olmazsa konu kapatılacaktır.
+            This NoX Finance issue has been marked as stale after 14 days without activity.
+            If the problem persists, please update the app/device version and the outcome without sharing personal data.
+            The issue will be closed if there is no further activity within 7 days.
           stale-pr-message: >
-            Bu NoX Finance PR'ında 14 gündür etkinlik yok. Çalışma devam ediyorsa durumunu güncelleyin.
-            7 gün içinde yeni etkinlik olmazsa PR kapatılacaktır.
+            This NoX Finance pull request has had no activity for 14 days. Please provide an update if work is ongoing.
+            It will be closed if there is no further activity within 7 days.
           close-issue-message: >
-            Belirtilen sürede herhangi bir işlem yapılmadığı için bu konu otomatik olarak kapatıldı. Sorun devam ediyorsa yeni bir konu açabilirsiniz.
+            This issue was automatically closed because there was no further activity during the notice period.
+            If the problem persists, you can open a new issue with updated details.
           close-pr-message: >
-            Belirtilen sürede herhangi bir işlem yapılmadığı için bu PR otomatik olarak kapatıldı. Çalışma devam ediyorsa yeniden açabilirsiniz.
+            This pull request was automatically closed because there was no further activity during the notice period.
+            You can reopen it if work is continuing.

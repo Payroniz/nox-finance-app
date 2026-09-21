@@ -1,25 +1,25 @@
-# NoX Finance Güvenlik Politikası
+# NoX Finance Security Policy
 
-NoX Finance; ödeme, borç, alacak, abonelik ve profil bilgilerini cihazda saklar. Güvenlik bildirimlerinde bu bilgilerin açığa çıkmasını önlemek önceliklidir.
+NoX Finance stores payment, debt, receivable, subscription, and profile information on the device. Preventing disclosure of this information is a priority when reporting security issues.
 
-## Desteklenen sürüm
+## Supported Version
 
-Düzeltmeler `main` dalındaki güncel kod için hazırlanır. Eski sürümler için ayrı bir güvenlik yaması takvimi yoktur; güncel sürümün kullanılması önerilir.
+Fixes are prepared for the current code on the `main` branch. There is no separate security patch schedule for older releases. Using the latest version is recommended.
 
-## Açık bildirme
+## Reporting a Vulnerability
 
-Güvenlik açığının ayrıntılarını veya çalışan istismar kodunu herkese açık Issues alanında paylaşmayın.
+Do not publish vulnerability details or working exploit code in public issues.
 
-1. [Deponun Security sayfasını](https://github.com/Payroniz/nox-finance-app/security) açın. **Report a vulnerability** seçeneği görünüyorsa özel bildirim oluşturun.
-2. Bu seçenek görünmüyorsa [depo sahibinin](https://github.com/Payroniz) yayımladığı özel iletişim kanalını kullanın. Böyle bir kanal da yoksa ayrıntıları paylaşmadan, yalnızca özel bildirim kanalının açılmasını isteyen bir konu oluşturun.
+1. Open the [repository's Security page](https://github.com/Payroniz/nox-finance-app/security). If **Report a vulnerability** is available, use it to create a private report.
+2. Otherwise, use a private contact channel published by the [repository owner](https://github.com/Payroniz). If no private channel is available, open an issue requesting one without disclosing vulnerability details.
 
-Bildirimde etkilenen sürüm/platform, beklenen ve gerçekleşen davranış, tekrar oluşturma adımları ve olası etki bulunsun. Gerçek kullanıcı verileri yerine sahte kayıtlar kullanın. PIN, erişim belirteci, yedek veya imzalama anahtarı göndermeyin.
+Include the affected version and platform, expected and actual behavior, reproduction steps, and potential impact. Use fictional records instead of real user data. Do not send PINs, access tokens, backups, or signing keys.
 
-## Veri ve yedeklerin korunması
+## Protecting Data and Backups
 
-- JSON yedekleri finans ve profil verileri içerebilir; PIN ve cihaz güvenlik ayarları dışa aktarılmaz. JSON yedekleri şifrelenmez.
-- PIN/biometrik ekran kilidi, dışarıya kaydedilmiş yedek dosyasını şifrelemez.
-- Uygulama alanındaki yedekler kaldırma işleminde silinebilir. Dış kopyaları erişimini denetlediğiniz konumlarda saklayın.
-- Güvenlik düzeltmeleri test edilirken eski yedeklerin geri yüklenmesi ve mevcut kayıtların korunması kontrol edilmelidir.
+- JSON backups may contain financial and profile information. PINs and device security settings are excluded from exports. JSON backups are not encrypted.
+- The PIN or biometric screen lock does not encrypt exported backup files.
+- Backups in the app's storage may be deleted when the app is uninstalled. Store external copies in locations where you control access.
+- When testing security fixes, verify that older backups can be restored and existing records are preserved.
 
-Bildirim için sabit yanıt veya çözüm süresi taahhüt edilmez. Açığın ayrıntılarını, düzeltmenin hazırlanması ve kullanıcıların güncelleyebilmesi için depo sahibiyle koordineli olarak paylaşın.
+No fixed response or resolution time is guaranteed. Coordinate disclosure with the repository owner to allow time for a fix and for users to update.

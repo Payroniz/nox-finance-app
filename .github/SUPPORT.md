@@ -1,31 +1,31 @@
-# NoX Finance Destek Rehberi
+# NoX Finance Support Guide
 
-Kurulum ve özellikler için [README](../README.md), sürüm değişiklikleri için [CHANGELOG](../CHANGELOG.md), geliştirme için [katkı rehberini](CONTRIBUTING.md) inceleyin.
+Read the [README](../README.md) for setup and features, the [CHANGELOG](../CHANGELOG.md) for release changes, and the [contribution guide](CONTRIBUTING.md) for development information.
 
-## Hata, soru ve özellik önerisi
+## Bugs, Questions, and Feature Requests
 
-[NoX Finance Issues](https://github.com/Payroniz/nox-finance-app/issues) üzerinden bildirim açabilirsiniz. Şunları ekleyin:
+Open a report in [NoX Finance Issues](https://github.com/Payroniz/nox-finance-app/issues). Include:
 
-- Uygulama sürümü, cihaz modeli ve Android/iOS sürümü.
-- Sorunu tekrar oluşturan adımlar ve beklenen davranış.
-- Kişisel bilgiler gizlenmiş ekran görüntüsü veya hata metni.
-- Yedekleme sorunuysa seçilen hedef: cihaz klasörü, bulut sağlayıcısı veya paylaşım ekranı.
+- App version, device model, and Android or iOS version.
+- Steps to reproduce the problem and the expected behavior.
+- A screenshot or error message with personal information redacted.
+- For backup problems, the selected destination: a device folder, cloud provider, or share sheet.
 
-Gerçek ödeme/borç kayıtlarını, JSON yedeklerini, hesap bilgilerini, PIN'i veya imzalama anahtarlarını herkese açık bildirimlere eklemeyin. Örnekleri sahte verilerle hazırlayın.
+Do not attach real payment or debt records, JSON backups, account details, PINs, or signing keys to public reports. Use fictional data in examples.
 
-## Yedekleme
+## Backups
 
-Otomatik yedekler NoX'un uygulama alanında tutulur; en yeni beş kopya saklanır. Uygulamayı kaldırmak bu kopyaları da siler. **Ayarlar → Şimdi Yedekle** ile uygulama dışında ayrıca bir kopya saklayın.
+Automatic backups are stored in NoX's application storage, keeping the five newest copies. Uninstalling the app also deletes these copies. Use the manual backup option in Settings to save an additional copy outside the app.
 
-- Klasör izni hatasında **Yedekleme Aracı** bölümünden klasörü yeniden seçin.
-- Bulut uygulaması klasör seçimine izin vermiyorsa **Diğer Uygulamalar** ile paylaşın ve alıcı uygulamada kaydetme işlemini tamamlayın.
-- Depolama alanı doluysa alan açıp yeniden deneyin.
-- **Yedeği Geri Yükle** mevcut finans kayıtlarını seçilen yedekteki kayıtlarla değiştirir. Önce güncel verileri dışarıya yedekleyin.
+- If a folder permission fails, select the folder again in the backup destination settings.
+- If a cloud app does not support folder selection, use the option to share with other apps and complete the save operation in the receiving app.
+- If storage is full, free some space and try again.
+- Restoring a backup replaces current financial records with the records in the selected backup. Export a copy of your current data first.
 
-Geliştirici cihazınızda tutulan kayıtlara uzaktan erişemez. Destek almak için uygulamayı silmeniz gerekmez.
+The developer cannot remotely access records stored on your device. You do not need to uninstall the app to request support.
 
-## Bildirimler ve abonelikler
+## Notifications and Subscriptions
 
-Bildirimler için cihazın uygulama izinlerini ve NoX içindeki bildirim ayarını kontrol edin. Abonelikler sekmesi tutar ve yenileme tarihi takibi içindir; hizmet satın almaz, ücret tahsil etmez veya sağlayıcıdaki üyeliği iptal etmez.
+For notification problems, check both the device's app permissions and NoX's notification setting. The Subscriptions tab tracks amounts and renewal dates. It does not purchase services, charge you, or cancel memberships with providers.
 
-Güvenlik açıklarını herkese açık konu yerine [güvenlik politikasındaki](SECURITY.md) yolla bildirin.
+Report security vulnerabilities through the process described in the [security policy](SECURITY.md), rather than in a public issue.

@@ -1,22 +1,25 @@
-# NoX Finance Değişiklik Günlüğü
+# NoX Finance Changelog
 
-Bu dosya NoX Finance uygulamasındaki kullanıcıya yansıyan değişiklikleri kaydeder. Önceki sürümlerin kaynak geçmişi [GitHub etiketlerinde](https://github.com/Payroniz/nox-finance-app/tags) bulunur.
+This file records user-facing changes to NoX Finance. Source history for earlier releases is available through the [GitHub tags](https://github.com/Payroniz/nox-finance-app/tags).
 
 ## v3.1.8 - 2026-09-21
 
-### Eklendi
-* Abonelikler sekmesi: ekleme, düzenleme, silme, aktif/pasif takip, haftalık/aylık/yıllık yenileme ve para birimine göre aylık toplamlar.
-* Aboneliklerin JSON yedeklerine ve geri yüklemeye dahil edilmesi, eski yedeklerle uyumluluk.
-* SQLite, yenileme hesapları ve yedekleme hata senaryoları için regresyon testleri.
+### Added
 
-### Düzeltildi
-* Android dosya sağlayıcılarıyla uyumsuz eski dosya API'si güncel File/Directory API'siyle değiştirildi, kayıt sonrası içerik doğrulaması eklendi.
-* Otomatik yedekler klasör iznine bağlı olmadan NoX alanında saklanır, başarısız eski kopya temizliği başarılı yedeği hata olarak göstermez.
-* Yedekleme hedefi her zaman değiştirilebilir, izin/alan hataları ve paylaşım sonuçları doğru açıklanır.
-* Paylaşılan dosyalar alıcı uygulama okumadan silinmez, yerel yedekleme zamanı ayrı takip edilir.
-* Tarayıcı önizlemesinde desteklenmeyen başlangıç bildirimi çağrısı engellendi.
+- Subscriptions tab with add, edit, and delete actions, active or paused tracking, weekly/monthly/yearly renewals, and monthly totals by currency.
+- Subscription records in JSON backups and restores, with compatibility for older backups.
+- Regression tests for SQLite operations, renewal calculations, and backup failure scenarios.
 
-### Değiştirildi
-* Açılış logosu ve NoX yazısı birlikte büyütüldü.
-* Alt menü yüksekliği, etiketlerin ve cihazın alt güvenli alanının sığması için güncellendi.
-* Uygulama sürümü 3.1.8, yerel Android versionCode 5, EAS preview/production derlemelerinde otomatik build numarası artışı.
+### Fixed
+
+- Replaced the legacy file API that was incompatible with some Android document providers with the current File/Directory API, and added verification after saving.
+- Automatic backups are stored in NoX's application storage without requiring external folder permissions. Failure to remove older copies no longer reports a successfully saved backup as failed.
+- Backup destinations can always be changed, with clearer messages for permission errors, insufficient storage, and sharing results.
+- Shared files are retained after the share sheet closes so the receiving app has time to read them. Automatic backup timestamps are tracked separately.
+- Prevented an unsupported notification response call during startup in the browser preview.
+
+### Changed
+
+- Enlarged the splash screen logo and NoX wordmark together.
+- Adjusted the bottom navigation height to accommodate labels and the device's bottom safe area.
+- Updated the app version to 3.1.8 and the local Android versionCode to 5, with automatic build number increments for EAS preview and production builds.

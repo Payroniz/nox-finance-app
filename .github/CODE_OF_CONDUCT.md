@@ -1,22 +1,22 @@
-# NoX Finance Davranış Kuralları
+# NoX Finance Code of Conduct
 
-## Kapsam
+## Scope
 
-Bu kurallar NoX Finance deposundaki konular, pull request'ler, kod incelemeleri ve proje adına yürütülen iletişim için geçerlidir. Katılım; kimlik, yaş, engellilik, köken, deneyim, inanç veya cinsel yönelimden bağımsız olarak saygılı olmalıdır.
+These rules apply to issues, pull requests, code reviews, and communications on behalf of NoX Finance. Everyone should be treated with respect, regardless of identity, age, disability, background, experience, beliefs, or sexual orientation.
 
-## Beklenen davranışlar
+## Expected Behavior
 
-- Yapıcı geri bildirim verin; kişileri değil, öneri ve kodu değerlendirin.
-- Farklı deneyim düzeylerine saygı gösterin; hata bildiren kişilere tekrar oluşturma konusunda yardımcı olun.
-- Proje bakımını yapan kişilerin zamanına ve katkıda bulunanların emeğine özen gösterin.
-- Örneklerde sahte finans verisi kullanın; kişisel kayıtların gizliliğini koruyun.
+- Give constructive feedback. Evaluate ideas and code rather than the people behind them.
+- Respect different levels of experience and help people reproduce reported problems.
+- Respect maintainers' time and contributors' work.
+- Use fictional financial data in examples and protect the privacy of personal records.
 
-## Kabul edilmeyen davranışlar
+## Unacceptable Behavior
 
-Taciz, tehdit, ayrımcılık, hakaret, kişisel saldırı, spam ve başkalarının özel bilgilerinin izinsiz paylaşılması kabul edilmez. Finans kayıtlarını, kimlik/iletişim bilgilerini veya erişim bilgilerini kişinin rızası olmadan yayımlamayın.
+Harassment, threats, discrimination, insults, personal attacks, spam, and sharing someone else's private information without permission are not acceptable. Do not publish financial records, identity or contact details, or access credentials without the person's consent.
 
-## Bildirim ve uygulama
+## Reporting and Enforcement
 
-Bir ihlali bildirirken [depo sahibinin](https://github.com/Payroniz) yayımladığı özel iletişim kanalını veya GitHub'ın ilgili içerikte sunduğu bildirim araçlarını kullanın. Özel bilgileri veya taciz içeriğini yeni bir herkese açık konuda yeniden yayımlamayın.
+Report violations through a private contact channel published by the [repository owner](https://github.com/Payroniz), or use GitHub's reporting tools on the relevant content. Do not republish private information or abusive content in a new public issue.
 
-Depo yöneticisi bağlama ve ihlalin ağırlığına göre içeriğin düzeltilmesini isteyebilir; yorumları kaldırabilir, tartışmayı kilitleyebilir, katkıyı reddedebilir veya katılımı sınırlayabilir. Kararlar ilgili kişilere saygılı, tutarlı ve ölçülü biçimde uygulanmalıdır.
+Depending on the context and severity of a violation, the maintainer may request corrections, remove comments, lock discussions, reject contributions, or restrict participation. Decisions should be respectful, consistent, and proportionate.
