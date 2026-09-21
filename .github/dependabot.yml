@@ -5,6 +5,9 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Expo's supported native versions are declared in package.json.
+    # Update within those ranges; SDK/native upgrades need expo install --fix.
+    versioning-strategy: lockfile-only
     ignore:
       - dependency-name: typescript
         update-types: [version-update:semver-major]
@@ -18,14 +21,12 @@ updates:
           - '@expo/*'
           - react
           - react-dom
+          - '@types/react'
           - react-native
           - react-native-*
           - '@react-native*/*'
 
         update-types: [minor, patch]
-        exclude-patterns:
-          - react-native-reanimated
-          - react-native-worklets
       development:
         dependency-type: development
         update-types: [minor, patch]
