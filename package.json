@@ -16,7 +16,7 @@
     "@expo-google-fonts/poppins": "^0.4.1",
     "@expo/vector-icons": "^15.0.2",
     "@react-native-community/datetimepicker": "9.1.0",
-    "date-fns": "^3.6.0",
+    "date-fns": "^4.4.0",
     "expo": "^57.0.11",
     "expo-build-properties": "~57.0.9",
     "expo-constants": "~57.0.9",
