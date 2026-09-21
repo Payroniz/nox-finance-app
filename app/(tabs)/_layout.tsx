@@ -1,27 +1,38 @@
 import { Tabs } from 'expo-router';
+import { Animated, Pressable } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Colors } from '../../src/constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const TabButton = Animated.createAnimatedComponent(Pressable);
 
 export default function TabLayout() {
+  const insets = useSafeAreaInsets();
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
+        tabBarButton: ({ style, ...props }) => (
+          <TabButton {...props} style={[style, { paddingHorizontal: 0 }]} />
+        ),
         tabBarStyle: {
           backgroundColor: Colors.tabBar,
           borderTopColor: Colors.tabBar,
           borderTopWidth: 0,
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 8,
+          height: 68 + insets.bottom,
+          paddingBottom: 6 + insets.bottom,
+          paddingTop: 6,
           elevation: 0,
           shadowOpacity: 0,
         },
         tabBarActiveTintColor: Colors.primary,
         tabBarInactiveTintColor: Colors.textMuted,
+        tabBarLabelPosition: 'below-icon',
         tabBarLabelStyle: {
           fontFamily: 'Poppins_500Medium',
           fontSize: 9,
+          lineHeight: 14,
+          flexShrink: 0,
         },
       }}
     >
@@ -40,6 +51,15 @@ export default function TabLayout() {
           title: 'Ödemeler',
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="calendar-clock" color={color} size={size} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="subscriptions"
+        options={{
+          title: 'Abonelikler',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="repeat" color={color} size={size} />
           ),
         }}
       />

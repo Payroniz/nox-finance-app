@@ -24,6 +24,7 @@ NoX Finance is an Expo application for tracking one-time or recurring payments, 
 ## Features
 
 - One-time, weekly, monthly, and yearly payment tracking
+- Subscription tracking with add/edit/delete, active/paused states, renewal dates, and monthly estimates per currency
 - Categories, due dates, times, notes, currencies, and custom icons
 - Separate states for pending, paid, and overdue payments
 - Debt and receivable tracking with partial payments and payment history
@@ -35,6 +36,26 @@ NoX Finance is an Expo application for tracking one-time or recurring payments, 
 - PIN protection, biometric authentication, and automatic locking
 - Automatic rotating local backups, JSON export, folder restore, and cloud-provider sharing
 - Secure in-app deletion of all application data
+
+## Version 3.1.8
+
+The **Abonelikler** tab tracks subscriptions such as YouTube, Spotify, and Netflix. Choose a weekly, monthly, or yearly cycle, amount, currency, and billing date. Upcoming renewal dates preserve the original billing day across short months and leap years. Paused subscriptions are excluded from totals. These records are included in JSON backups; they do not charge or cancel services or automatically create paid transactions.
+
+Automatic backups keep the five newest copies in NoX's private application directory, without requiring an external folder permission. These copies are removed when the app is uninstalled. Use **Şimdi Yedekle** to save an additional copy to a selected folder or another app. **Yedekleme Aracı** remains available even when automatic backup is off, so an expired folder permission can be renewed. Existing external backups can still be restored with the file picker.
+
+The splash logo and wordmark are larger. Native splash changes require a new Android/iOS build; Metro refresh or an over-the-air JavaScript update cannot replace them. Preview and production EAS builds increment the remote build number automatically.
+
+Development checks (Node.js 22.20+):
+
+```bash
+npm ci
+npm run lint
+npm run typecheck
+npm test
+npx expo export --platform android
+```
+
+Regression tests exercise billing dates, currency totals, real SQLite CRUD and restore transactions, and backup I/O through simulated native file adapters. Final checks on an Android device should cover the startup splash, folder selection/cancellation, a cloud-provider export, sharing, and restoring a backup with subscriptions and icons.
 
 ## Screenshots
 

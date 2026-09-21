@@ -1,0 +1,43 @@
+name: NoX Finance - Kod ve Veri Kontrolleri
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: ESLint, TypeScript, testler ve Android paketi
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      EXPO_NO_TELEMETRY: '1'
+    steps:
+      - name: Kodu al
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Node.js kur
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22.20.0'
+          cache: npm
+      - name: Bağımlılıkları kur
+        run: npm ci --no-audit --no-fund
+      - name: ESLint
+        run: npm run lint
+      - name: TypeScript
+        run: npm run typecheck
+      - name: Veritabanı ve yedekleme testleri
+        run: npm test
+      - name: Android JavaScript paketini doğrula
+        run: npx expo export --platform android --output-dir dist/android

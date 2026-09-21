@@ -6,7 +6,7 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Payment } from '../constants/types';
-import { Colors, BorderRadius, Spacing, FontSize, FontWeight, Shadow } from '../constants/theme';
+import { Colors, BorderRadius, Spacing, FontSize, Shadow } from '../constants/theme';
 import { formatCurrency, formatDateWithTime, getStatusColor, getStatusLabel, getStatusIcon, getRecurrenceLabel, getTimeRemaining } from '../utils/helpers';
 
 interface PaymentCardProps {

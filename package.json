@@ -1,8 +1,11 @@
 {
   "name": "nox-finance",
-  "version": "3.1.7",
+  "version": "3.1.8",
   "main": "expo-router/entry",
   "scripts": {
+    "lint": "eslint --config .github/eslint.config.mjs .",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-test-isolation=none tests/*.test.cjs",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
@@ -45,7 +48,11 @@
   },
   "devDependencies": {
     "@babel/core": "^7.24.0",
+    "@eslint/js": "^10.0.1",
     "@types/react": "~19.2.4",
-    "typescript": "~6.0.3"
+    "eslint": "^10.11.0",
+    "globals": "^16.5.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.70.0"
   }
 }

@@ -1,0 +1,43 @@
+name: NoX Finance - Hareketsiz Konular
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: stale
+  cancel-in-progress: false
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/stale@v11
+        with:
+          days-before-stale: 14
+          days-before-close: 7
+          stale-issue-label: hareketsiz
+          stale-pr-label: hareketsiz
+          exempt-issue-labels: security,bug,keep-open
+          exempt-pr-labels: security,bug,keep-open
+          exempt-all-assignees: true
+          exempt-draft-pr: true
+          remove-stale-when-updated: true
+          operations-per-run: 30
+          stale-issue-message: >
+            Bu NoX Finance konusu 14 gündür etkinlik olmadığı için "hareketsiz" olarak işaretlendi.
+            Sorun devam ediyorsa uygulama/cihaz sürümünü ve sonucu kişisel veri paylaşmadan güncelleyin.
+            7 gün içinde yeni etkinlik olmazsa konu kapatılacaktır.
+          stale-pr-message: >
+            Bu NoX Finance PR'ında 14 gündür etkinlik yok. Çalışma devam ediyorsa durumunu güncelleyin.
+            7 gün içinde yeni etkinlik olmazsa PR kapatılacaktır.
+          close-issue-message: >
+            Belirtilen sürede herhangi bir işlem yapılmadığı için bu konu otomatik olarak kapatıldı. Sorun devam ediyorsa yeni bir konu açabilirsiniz.
+          close-pr-message: >
+            Belirtilen sürede herhangi bir işlem yapılmadığı için bu PR otomatik olarak kapatıldı. Çalışma devam ediyorsa yeniden açabilirsiniz.

@@ -1,6 +1,7 @@
 import * as SQLite from 'expo-sqlite';
-import { Payment, Debt, DebtPayment, Category, Settings, AppSettings, Currency, BackupDestination, BackupFrequency, UploadedIcon } from '../constants/types';
+import { Payment, Debt, DebtPayment, Category, Settings, AppSettings, Currency, BackupDestination, BackupFrequency, UploadedIcon, Subscription, SubscriptionInput } from '../constants/types';
 import { formatLocalDateKey, parseLocalDate } from '../utils/helpers';
+import { validateSubscription } from '../utils/subscriptions';
 
 const DATABASE_NAME = 'nox.db';
 
@@ -35,6 +36,18 @@ export const initializeDatabase = async (): Promise<void> => {
       notes TEXT DEFAULT '',
       reminder_days TEXT DEFAULT '[]',
       notification_id TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      amount REAL NOT NULL CHECK (amount > 0),
+      currency TEXT NOT NULL DEFAULT 'TRY',
+      billing_cycle TEXT NOT NULL DEFAULT 'monthly',
+      renewal_date TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+      notes TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -212,6 +225,24 @@ const seedDefaultSettings = async (database: SQLite.SQLiteDatabase): Promise<voi
 export const getPayments = async (): Promise<Payment[]> => {
   const database = await getDatabase();
   return await database.getAllAsync<Payment>('SELECT * FROM payments ORDER BY due_date ASC');
+};
+
+export const getSubscriptions = async (): Promise<Subscription[]> =>
+  (await getDatabase()).getAllAsync<Subscription>('SELECT * FROM subscriptions ORDER BY active DESC, renewal_date ASC');
+
+export const saveSubscription = async (item: SubscriptionInput, id?: number): Promise<void> => {
+  validateSubscription(item);
+  const database = await getDatabase();
+  const values = [item.name.trim(), item.amount, item.currency, item.billing_cycle, item.renewal_date, item.active, item.notes.trim()];
+  if (id !== undefined) {
+    await database.runAsync('UPDATE subscriptions SET name = ?, amount = ?, currency = ?, billing_cycle = ?, renewal_date = ?, active = ?, notes = ? WHERE id = ?', [...values, id]);
+  } else {
+    await database.runAsync('INSERT INTO subscriptions (name, amount, currency, billing_cycle, renewal_date, active, notes) VALUES (?, ?, ?, ?, ?, ?, ?)', values);
+  }
+};
+
+export const deleteSubscription = async (id: number): Promise<void> => {
+  await (await getDatabase()).runAsync('DELETE FROM subscriptions WHERE id = ?', [id]);
 };
 
 export const getPaymentsByDate = async (date: string): Promise<Payment[]> => {
@@ -509,19 +540,21 @@ export const exportData = async () => {
   const debtPayments = await database.getAllAsync<DebtPayment>('SELECT * FROM debt_payments');
   const categories = await database.getAllAsync<Category>('SELECT * FROM categories');
   const uploadedIcons = await database.getAllAsync<UploadedIcon>('SELECT * FROM uploaded_icons');
+  const subscriptions = await getSubscriptions();
   const settings = await database.getAllAsync<Settings>(
-    "SELECT * FROM settings WHERE key NOT IN ('pinCode', 'pinEnabled', 'biometricEnabled', 'notificationPrivacyMigrated', 'automaticBackupEnabled', 'backupDirectoryUri', 'backupDirectoryLabel', 'lastBackupAt')"
+    "SELECT * FROM settings WHERE key NOT IN ('pinCode', 'pinEnabled', 'biometricEnabled', 'notificationPrivacyMigrated', 'automaticBackupEnabled', 'backupDirectoryUri', 'backupDirectoryLabel', 'lastBackupAt', 'lastAutomaticBackupAt')"
   );
 
   return JSON.stringify({
     format: 'nox-finance-backup',
-    version: 4,
+    version: 5,
     exportedAt: new Date().toISOString(),
     payments,
     debts,
     debtPayments,
     categories,
     uploadedIcons,
+    subscriptions,
     settings,
   }, null, 2);
 };
@@ -534,6 +567,13 @@ export const importData = async (raw: string): Promise<void> => {
   const categories = parsed.categories;
   const settings = parsed.settings;
   const uploadedIcons = Array.isArray(parsed.uploadedIcons) ? parsed.uploadedIcons : [];
+  // Versions before 5 did not contain subscriptions.
+  if (parsed.subscriptions !== undefined && !Array.isArray(parsed.subscriptions)) throw new Error('INVALID_BACKUP');
+  const subscriptions = (parsed.subscriptions ?? []) as Subscription[];
+  for (const item of subscriptions) {
+    if (!item || !Number.isInteger(item.id) || item.id <= 0) throw new Error('INVALID_BACKUP');
+    validateSubscription(item);
+  }
 
   if (![payments, debts, debtPayments, categories, settings].every(Array.isArray)) {
     throw new Error('INVALID_BACKUP');
@@ -547,6 +587,7 @@ export const importData = async (raw: string): Promise<void> => {
       DELETE FROM payments;
       DELETE FROM categories;
       DELETE FROM uploaded_icons;
+      DELETE FROM subscriptions;
     `);
 
     for (const item of payments as Payment[]) {
@@ -557,6 +598,13 @@ export const importData = async (raw: string): Promise<void> => {
         [item.id, item.name, item.amount, item.currency, item.category, item.icon_type, item.icon_value,
           due ? formatLocalDateKey(due) : item.due_date, item.due_time, item.recurrence, item.status,
           item.notes ?? '', item.reminder_days ?? '[]', item.created_at ?? new Date().toISOString()]
+      );
+    }
+
+    for (const item of subscriptions) {
+      await transaction.runAsync(
+        'INSERT INTO subscriptions (id, name, amount, currency, billing_cycle, renewal_date, active, notes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [item.id, item.name.trim(), item.amount, item.currency, item.billing_cycle, item.renewal_date, item.active, item.notes, item.created_at ?? new Date().toISOString()]
       );
     }
 
@@ -595,7 +643,7 @@ export const importData = async (raw: string): Promise<void> => {
 
     const protectedSettings = new Set([
       'pinCode', 'pinEnabled', 'biometricEnabled', 'notificationPrivacyMigrated',
-      'automaticBackupEnabled', 'backupDirectoryUri', 'backupDirectoryLabel', 'lastBackupAt',
+      'automaticBackupEnabled', 'backupDirectoryUri', 'backupDirectoryLabel', 'lastBackupAt', 'lastAutomaticBackupAt',
     ]);
     for (const item of settings as Settings[]) {
       if (!item?.key || protectedSettings.has(item.key)) continue;
@@ -620,9 +668,10 @@ export const deleteAllData = async (): Promise<void> => {
       DELETE FROM payments;
       DELETE FROM categories;
       DELETE FROM uploaded_icons;
+      DELETE FROM subscriptions;
       DELETE FROM settings;
       DELETE FROM sqlite_sequence
-        WHERE name IN ('payments', 'debts', 'debt_payments', 'categories', 'uploaded_icons');
+        WHERE name IN ('payments', 'debts', 'debt_payments', 'categories', 'uploaded_icons', 'subscriptions');
     `);
   });
 

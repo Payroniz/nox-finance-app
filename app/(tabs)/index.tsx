@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  RefreshControl, StatusBar, Modal, Dimensions
+  RefreshControl, StatusBar, Modal
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, router } from 'expo-router';
@@ -23,8 +23,6 @@ import {
 } from '../../src/utils/helpers';
 import { Payment } from '../../src/constants/types';
 import { cancelNotification } from '../../src/utils/notifications';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 type InAppNotification = {
   id: string;

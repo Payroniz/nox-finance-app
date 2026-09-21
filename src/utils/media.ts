@@ -1,15 +1,14 @@
-import * as FileSystem from 'expo-file-system/legacy';
+import { Directory, File, Paths } from 'expo-file-system';
 
 const MEDIA_FOLDER = 'nox-media/';
 
 const getMediaDirectory = (): string => {
-  if (!FileSystem.documentDirectory) throw new Error('DOCUMENT_DIRECTORY_UNAVAILABLE');
-  return `${FileSystem.documentDirectory}${MEDIA_FOLDER}`;
+  return new Directory(Paths.document, MEDIA_FOLDER).uri.replace(/\/+$/, '') + '/';
 };
 
 export const ensureMediaDirectory = async (): Promise<string> => {
   const directory = getMediaDirectory();
-  await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
+  new Directory(directory).create({ intermediates: true, idempotent: true });
   return directory;
 };
 
@@ -26,7 +25,7 @@ export const persistMediaFile = async (sourceUri: string, prefix = 'image'): Pro
   if (sourceUri.startsWith(getMediaDirectory())) return sourceUri;
   const directory = await ensureMediaDirectory();
   const target = `${directory}${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extensionFromUri(sourceUri)}`;
-  await FileSystem.copyAsync({ from: sourceUri, to: target });
+  await new File(sourceUri).copy(new File(target));
   return target;
 };
 
@@ -34,10 +33,11 @@ export const writeRestoredMedia = async (base64: string, extension: string, pref
   const directory = await ensureMediaDirectory();
   const safeExtension = extension.replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
   const target = `${directory}${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${safeExtension}`;
-  await FileSystem.writeAsStringAsync(target, base64, { encoding: FileSystem.EncodingType.Base64 });
+  new File(target).write(base64, { encoding: 'base64' });
   return target;
 };
 
 export const clearManagedMedia = async (): Promise<void> => {
-  await FileSystem.deleteAsync(getMediaDirectory(), { idempotent: true }).catch(() => undefined);
+  const directory = new Directory(getMediaDirectory());
+  if (directory.exists) directory.delete();
 };

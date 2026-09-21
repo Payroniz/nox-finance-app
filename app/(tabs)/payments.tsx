@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, FlatList, StatusBar, ScrollView
+  View, Text, StyleSheet, TouchableOpacity, FlatList, StatusBar
 } from 'react-native';
 import { Calendar, LocaleConfig } from 'react-native-calendars';
 import { MaterialCommunityIcons } from '@expo/vector-icons';

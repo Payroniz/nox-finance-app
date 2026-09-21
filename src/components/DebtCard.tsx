@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Debt } from '../constants/types';
 import { Colors, BorderRadius, Spacing, FontSize, Shadow } from '../constants/theme';
-import { formatCurrency, formatDate, getDueDateLabel, determineDebtStatus, getDebtStatusColor } from '../utils/helpers';
+import { formatCurrency, getDueDateLabel, determineDebtStatus, getDebtStatusColor } from '../utils/helpers';
 
 interface DebtCardProps {
   debt: Debt;

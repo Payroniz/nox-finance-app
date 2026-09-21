@@ -1,0 +1,30 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Expo/React Native updates must be reviewed together for SDK compatibility.
+      expo:
+        patterns:
+          - expo
+          - expo-*
+          - '@expo/*'
+          - react
+          - react-dom
+          - react-native
+          - react-native-*
+          - '@react-native*/*'
+      development:
+        dependency-type: development
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ['*']

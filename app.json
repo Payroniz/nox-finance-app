@@ -2,7 +2,7 @@
   "expo": {
     "name": "NoX",
     "slug": "nox-finance-app",
-    "version": "3.1.7",
+    "version": "3.1.8",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
@@ -20,7 +20,7 @@
     },
     "android": {
       "package": "com.nox.finance",
-      "versionCode": 4,
+      "versionCode": 5,
       "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.SCHEDULE_EXACT_ALARM",
@@ -66,6 +66,7 @@
         "expo-splash-screen",
         {
           "image": "./assets/splash.png",
+          "imageWidth": 280,
           "resizeMode": "contain",
           "backgroundColor": "#363636"
         }

@@ -7,6 +7,20 @@ export type DebtStatus = 'ontime' | 'approaching' | 'overdue';
 export type BackupFrequency = 'daily' | 'weekly' | 'monthly';
 export type BackupDestination = 'device' | 'google-drive' | 'dropbox' | 'onedrive' | 'share';
 
+export type SubscriptionCycle = 'weekly' | 'monthly' | 'yearly';
+export interface Subscription {
+  id: number;
+  name: string;
+  amount: number;
+  currency: Currency;
+  billing_cycle: SubscriptionCycle;
+  renewal_date: string;
+  active: number;
+  notes: string;
+  created_at: string;
+}
+export type SubscriptionInput = Omit<Subscription, 'id' | 'created_at'>;
+
 export interface UploadedIcon {
   id: number;
   uri: string;

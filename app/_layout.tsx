@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, TouchableOpacity, AppState, AppStateStatus,
+  View, Text, StyleSheet, TextInput, TouchableOpacity, AppState, AppStateStatus, Platform,
 } from 'react-native';
 import { Stack, router } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -91,7 +91,7 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    if (!appIsReady) return;
+    if (!appIsReady || Platform.OS === 'web') return;
 
     const openNotificationTarget = (response: Notifications.NotificationResponse) => {
       const data = response.notification.request.content.data as Record<string, unknown>;

@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from 'expo-router';
-import { Colors, Spacing, BorderRadius, FontSize, Shadow } from '../../src/constants/theme';
+import { Colors, Spacing, BorderRadius, FontSize } from '../../src/constants/theme';
 import { Card } from '../../src/components/Card';
 import { getMonthlyStats, getDebts, getPayments } from '../../src/db/database';
 import { formatCurrency } from '../../src/utils/helpers';
@@ -64,7 +64,6 @@ export default function StatsScreen() {
     ? Math.max(...stats.categoryBreakdown.map((c: any) => c.amount), 1)
     : 1;
 
-  const totalWeekly = stats?.weeklyData?.reduce((s: number, d: any) => s + d.amount, 0) || 0;
   const maxWeekly = stats?.weeklyData ? Math.max(...stats.weeklyData.map((d: any) => d.amount), 1) : 1;
   const recordCount = (stats?.paidCount ?? 0) + (stats?.pendingCount ?? 0) + (stats?.overdueCount ?? 0);
   const averagePayment = recordCount ? (stats?.totalExpense ?? 0) / recordCount : 0;

@@ -1,8 +1,9 @@
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system/legacy';
+import { Directory, File, Paths } from 'expo-file-system';
+import { Platform } from 'react-native';
 import * as Sharing from 'expo-sharing';
 import { BackupDestination } from '../constants/types';
-import { exportData, getAllSettings, importData, setSetting } from '../db/database';
+import { exportData, getAllSettings, getSetting, importData, setSetting } from '../db/database';
 import { writeRestoredMedia } from './media';
 
 const AUTO_BACKUP_FOLDER = 'nox-backups/';
@@ -20,19 +21,27 @@ type EmbeddedAsset = { originalUri: string; extension: string; base64: string };
 
 const createFileName = (): string => {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  return `nox-backup-${stamp}.json`;
+  return `nox-backup-${stamp}-${Math.random().toString(36).slice(2, 8)}.json`;
 };
 
-const getAutomaticBackupDirectory = (): string => {
-  if (!FileSystem.documentDirectory) throw new Error('DOCUMENT_DIRECTORY_UNAVAILABLE');
-  return `${FileSystem.documentDirectory}${AUTO_BACKUP_FOLDER}`;
-};
-
-const ensureAutomaticBackupDirectory = async (): Promise<string> => {
-  const directory = getAutomaticBackupDirectory();
-  await FileSystem.makeDirectoryAsync(directory, { intermediates: true });
+const ensureAutomaticBackupDirectory = (): Directory => {
+  const directory = new Directory(Paths.document, AUTO_BACKUP_FOLDER);
+  directory.create({ intermediates: true, idempotent: true });
   return directory;
 };
+
+export const getBackupErrorMessage = (error: unknown): string => {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/space|ENOSPC|disk.*full/i.test(message)) return 'Cihazda yeterli boş alan yok. Biraz yer açıp yeniden deneyin.';
+  if (message === 'SHARING_UNAVAILABLE') return 'Bu cihazda paylaşım ekranı kullanılamıyor. Yedeğiniz NoX alanında saklandı.';
+  if (message === 'DESTINATION_NOT_CONFIGURED' || /permission|denied|access|writ|directory|folder|SAF/i.test(message)) {
+    return 'Seçilen klasöre erişilemiyor. “Yedekleme Aracı” bölümünden klasörü yeniden seçin veya “Diğer Uygulamalar” ile paylaşın.';
+  }
+  return 'Yedek kaydedilemedi. Kayıt klasörünü yeniden seçip deneyin veya “Diğer Uygulamalar” ile paylaşın.';
+};
+
+export const isBackupCancelled = (error: unknown): boolean =>
+  /cancel|DIRECTORY_PERMISSION_DENIED/i.test(error instanceof Error ? error.message : String(error));
 
 const fileNameFromUri = (uri: string): string => {
   const decoded = decodeURIComponent(uri);
@@ -62,14 +71,14 @@ const createPortableBackup = async (): Promise<string> => {
   const mediaAssets: EmbeddedAsset[] = [];
   for (const originalUri of mediaUris) {
     try {
-      const base64 = await FileSystem.readAsStringAsync(originalUri, { encoding: FileSystem.EncodingType.Base64 });
+      const base64 = await new File(originalUri).base64();
       if (base64) mediaAssets.push({ originalUri, extension: extensionFromUri(originalUri), base64 });
     } catch {
     }
   }
   parsed.mediaAssets = mediaAssets;
   parsed.mediaIncluded = mediaAssets.length;
-  parsed.version = 4;
+  parsed.version = 5;
   return JSON.stringify(parsed, null, 2);
 };
 
@@ -101,72 +110,102 @@ const restorePortableBackup = async (raw: string): Promise<void> => {
 
 const parseBackupDate = (name: string): string => {
   const match = name.match(/nox-backup-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/i);
-  return match ? `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}` : '';
+  return match ? `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}Z` : '';
 };
 
 const readConfiguredEntries = async (): Promise<BackupEntry[]> => {
-  const settings = await getAllSettings();
-  if (settings.backupDirectoryUri) {
-    const files = await FileSystem.StorageAccessFramework.readDirectoryAsync(settings.backupDirectoryUri);
-    return files.filter(uri => BACKUP_PATTERN.test(fileNameFromUri(uri))).map(uri => {
-      const name = fileNameFromUri(uri);
-      return { name, uri, createdAt: parseBackupDate(name), location: settings.backupDirectoryLabel || 'Seçilen klasör' };
-    }).sort((a, b) => b.name.localeCompare(a.name));
-  }
-  const directory = await ensureAutomaticBackupDirectory();
-  const files = await FileSystem.readDirectoryAsync(directory);
-  return files.filter(name => BACKUP_PATTERN.test(name))
-    .map(name => ({ name, uri: `${directory}${name}`, createdAt: parseBackupDate(name), location: 'NoX güvenli alanı' }))
+  const directory = ensureAutomaticBackupDirectory();
+  return directory.list().filter((file): file is File => file instanceof File && BACKUP_PATTERN.test(file.name))
+    .map(file => ({ name: file.name, uri: file.uri, createdAt: parseBackupDate(file.name), location: 'NoX uygulama alanı' }))
     .sort((a, b) => b.name.localeCompare(a.name));
 };
 
-export const cleanupTemporaryBackups = async (): Promise<void> => {
-  if (!FileSystem.cacheDirectory) return;
-  const files = await FileSystem.readDirectoryAsync(FileSystem.cacheDirectory).catch(() => []);
-  await Promise.all(files.filter(name => BACKUP_PATTERN.test(name)).map(name =>
-    FileSystem.deleteAsync(`${FileSystem.cacheDirectory}${name}`, { idempotent: true })
-  ));
+export const cleanupTemporaryBackups = async (all = false): Promise<void> => {
+  for (const file of Paths.cache.list()) {
+    // A share receiver may still be reading the file after the sheet closes.
+    if (file instanceof File && BACKUP_PATTERN.test(file.name)
+      && (all || (file.modificationTime !== null && Date.now() - file.modificationTime > 86400000))) {
+      if (all) file.delete();
+      else { try { file.delete(); } catch { /* Retry cleanup on a later launch. */ } }
+    }
+  }
+};
+
+export const clearLocalBackups = async (): Promise<void> => {
+  const directory = new Directory(Paths.document, AUTO_BACKUP_FOLDER);
+  if (directory.exists) directory.delete();
+  await cleanupTemporaryBackups(true);
 };
 
 export const configureBackupDestination = async (destination: BackupDestination, destinationLabel: string): Promise<string> => {
-  if (destination === 'share') {
+  if (destination === 'share' || Platform.OS !== 'android') {
     await Promise.all([
-      setSetting('backupDestination', destination),
+      setSetting('backupDestination', 'share'),
       setSetting('backupDirectoryUri', ''),
       setSetting('backupDirectoryLabel', 'Her yedekte paylaşım ekranı'),
     ]);
     return 'Her yedekte paylaşım ekranı';
   }
-  const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
-  if (!permissions.granted) throw new Error('DIRECTORY_PERMISSION_DENIED');
+  const directory = await Directory.pickDirectoryAsync();
+  // Verify read/write access before replacing a working destination.
+  const probe = directory.createFile(`nox-access-check-${Date.now()}.txt`, 'text/plain');
+  try {
+    probe.write('NoX');
+    if (await probe.text() !== 'NoX') throw new Error('DIRECTORY_WRITE_FAILED');
+  } finally {
+    try { probe.delete(); } catch { /* Some providers delay deletion. */ }
+  }
   const label = `${destinationLabel} • seçilen klasör`;
   await Promise.all([
     setSetting('backupDestination', destination),
-    setSetting('backupDirectoryUri', permissions.directoryUri),
+    setSetting('backupDirectoryUri', directory.uri),
     setSetting('backupDirectoryLabel', label),
   ]);
   return label;
 };
 
-export const createAutomaticBackup = async (): Promise<string> => {
-  const settings = await getAllSettings();
+const writeLocalBackup = async (): Promise<string> => {
   const fileName = createFileName();
   const raw = await createPortableBackup();
-  const path = settings.backupDirectoryUri
-    ? await FileSystem.StorageAccessFramework.createFileAsync(settings.backupDirectoryUri, fileName, 'application/json')
-    : `${await ensureAutomaticBackupDirectory()}${fileName}`;
-  await FileSystem.writeAsStringAsync(path, raw, { encoding: FileSystem.EncodingType.UTF8 });
+  const directory = ensureAutomaticBackupDirectory();
+  const pending = new File(directory, `${fileName}.partial`);
+  const file = new File(directory, fileName);
+  try {
+    pending.write(raw);
+    if (await pending.text() !== raw) throw new Error('BACKUP_WRITE_FAILED');
+    await pending.move(file);
+  } catch (error) {
+    try { pending.delete(); } catch { /* Do not hide the original write error. */ }
+    throw error;
+  }
   await setSetting('lastBackupAt', new Date().toISOString());
-  const files = await readConfiguredEntries();
-  await Promise.all(files.slice(MAX_AUTOMATIC_BACKUPS).map(item => FileSystem.deleteAsync(item.uri, { idempotent: true })));
-  return path;
+  // Retention failures must not turn a successfully saved backup into an error.
+  try {
+    const files = await readConfiguredEntries();
+    for (const entry of files.slice(MAX_AUTOMATIC_BACKUPS)) {
+      try { new File(entry.uri).delete(); } catch { /* Retry next time. */ }
+    }
+  } catch { /* The new backup is already safely stored. */ }
+  return file.uri;
+};
+
+let automaticBackup: Promise<string> | null = null;
+export const createAutomaticBackup = (): Promise<string> => {
+  if (!automaticBackup) {
+    automaticBackup = writeLocalBackup().then(async uri => {
+      await setSetting('lastAutomaticBackupAt', new Date().toISOString());
+      return uri;
+    }).finally(() => { automaticBackup = null; });
+  }
+  return automaticBackup;
 };
 
 export const runAutomaticBackupIfDue = async (): Promise<boolean> => {
   const settings = await getAllSettings();
   if (!settings.automaticBackupEnabled) return false;
   const intervalDays = { daily: 1, weekly: 7, monthly: 30 }[settings.backupFrequency];
-  const lastBackup = settings.lastBackupAt ? new Date(settings.lastBackupAt) : null;
+  const lastBackupAt = await getSetting('lastAutomaticBackupAt');
+  const lastBackup = lastBackupAt ? new Date(lastBackupAt) : null;
   const elapsed = lastBackup && !Number.isNaN(lastBackup.getTime()) ? Date.now() - lastBackup.getTime() : Infinity;
   if (elapsed < intervalDays * 86400000) return false;
   await createAutomaticBackup();
@@ -174,24 +213,26 @@ export const runAutomaticBackupIfDue = async (): Promise<boolean> => {
 };
 
 export const shareBackup = async (): Promise<void> => {
-  if (!FileSystem.cacheDirectory) throw new Error('CACHE_UNAVAILABLE');
+  const localUri = await writeLocalBackup();
   if (!(await Sharing.isAvailableAsync())) throw new Error('SHARING_UNAVAILABLE');
-  const path = `${FileSystem.cacheDirectory}${createFileName()}`;
-  try {
-    await FileSystem.writeAsStringAsync(path, await createPortableBackup(), { encoding: FileSystem.EncodingType.UTF8 });
-    await Sharing.shareAsync(path, { mimeType: 'application/json', dialogTitle: 'NoX yedeğini kaydet', UTI: 'public.json' });
-    await setSetting('lastBackupAt', new Date().toISOString());
-  } finally {
-    await FileSystem.deleteAsync(path, { idempotent: true }).catch(() => undefined);
-  }
+  const file = new File(Paths.cache, createFileName());
+  await new File(localUri).copy(file);
+  await Sharing.shareAsync(file.uri, { mimeType: 'application/json', dialogTitle: 'NoX yedeğini kaydet', UTI: 'public.json' });
 };
 
 export const saveBackupToConfiguredDestination = async (): Promise<void> => {
   const settings = await getAllSettings();
   if (settings.backupDestination === 'share') return shareBackup();
   if (!settings.backupDirectoryUri) throw new Error('DESTINATION_NOT_CONFIGURED');
-  const uri = await FileSystem.StorageAccessFramework.createFileAsync(settings.backupDirectoryUri, createFileName(), 'application/json');
-  await FileSystem.writeAsStringAsync(uri, await createPortableBackup(), { encoding: FileSystem.EncodingType.UTF8 });
+  const raw = await createPortableBackup();
+  const file = new Directory(settings.backupDirectoryUri).createFile(createFileName(), 'application/json');
+  try {
+    file.write(raw);
+    if (await file.text() !== raw) throw new Error('BACKUP_WRITE_FAILED');
+  } catch (error) {
+    try { file.delete(); } catch { /* Preserve the original failure. */ }
+    throw error;
+  }
   await setSetting('lastBackupAt', new Date().toISOString());
 };
 
@@ -199,7 +240,7 @@ export const restoreBackupFromPicker = async (): Promise<string> => {
   const result = await DocumentPicker.getDocumentAsync({ type: ['application/json', 'text/json', 'text/plain'], copyToCacheDirectory: true, multiple: false });
   if (result.canceled || !result.assets[0]) throw new Error('PICKER_CANCELLED');
   const asset = result.assets[0];
-  const raw = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.UTF8 });
+  const raw = await new File(asset.uri).text();
   await restorePortableBackup(raw);
   return asset.name || fileNameFromUri(asset.uri);
 };
@@ -207,7 +248,7 @@ export const restoreBackupFromPicker = async (): Promise<string> => {
 export const listAutomaticBackups = async (): Promise<BackupEntry[]> => readConfiguredEntries();
 
 export const restoreAutomaticBackup = async (entry: BackupEntry): Promise<string> => {
-  const raw = await FileSystem.readAsStringAsync(entry.uri, { encoding: FileSystem.EncodingType.UTF8 });
+  const raw = await new File(entry.uri).text();
   await restorePortableBackup(raw);
   return entry.name;
 };

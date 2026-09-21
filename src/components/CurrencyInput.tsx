@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { View, Text, TextInput, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, TextInput, StyleSheet } from 'react-native';
 import { Colors, BorderRadius, FontSize, Spacing } from '../constants/theme';
 
 interface CurrencyInputProps {
@@ -16,14 +16,6 @@ export const CurrencyInput: React.FC<CurrencyInputProps> = ({ value, onChange, s
   const parts = value.split('.');
   const liraStr = parts[0] || '';
   const kurusStr = parts[1] !== undefined ? parts[1] : '';
-
-  const handleLiraChange = (text: string) => {
-    const clean = text.replace(/\D/g, '');
-    onChange(clean + (kurusStr !== '' ? '.' + kurusStr : ''));
-    if (text.endsWith('.') || text.endsWith(',')) {
-      kurusRef.current?.focus();
-    }
-  };
 
   const handleKurusChange = (text: string) => {
     const clean = text.replace(/\D/g, '').slice(0, 2);

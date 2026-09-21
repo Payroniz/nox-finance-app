@@ -27,10 +27,12 @@ import {
 } from '../../src/utils/security';
 import {
   BackupEntry,
-  cleanupTemporaryBackups,
+  clearLocalBackups,
   configureBackupDestination,
   createAutomaticBackup,
   getAutomaticBackupCount,
+  getBackupErrorMessage,
+  isBackupCancelled,
   listAutomaticBackups,
   restoreAutomaticBackup,
   restoreBackupFromPicker,
@@ -291,13 +293,15 @@ export default function SettingsScreen() {
       }
       else await shareBackup();
       await loadSettings();
-      Alert.alert('Yedek Hazır', 'Yedek dosyası seçtiğiniz hedefe gönderildi.');
+      Alert.alert('Yedek Hazır', settings.backupDestination === 'share' || Platform.OS !== 'android'
+        ? 'Bir kopya NoX alanında saklandı. Dışarıya kaydetmek için paylaşım ekranındaki işlemi tamamlayın.'
+        : 'Yedek dosyası seçtiğiniz klasöre kaydedildi ve doğrulandı.');
     } catch (e) {
-      const message = (e as Error).message;
-      if (message !== 'DIRECTORY_PERMISSION_DENIED') {
-        Alert.alert('Yedeklenemedi', message === 'DESTINATION_NOT_CONFIGURED'
-          ? 'Bir kayıt klasörü seçin veya “Diğer Uygulamalar” hedefini kullanın.'
-          : 'Yedek hedefi açılamadı veya dosya kaydedilemedi.');
+      if (!isBackupCancelled(e)) {
+        Alert.alert('Yedeklenemedi', getBackupErrorMessage(e), [
+          { text: 'Tamam', style: 'cancel' },
+          { text: 'Hedefi Değiştir', onPress: () => setActiveSheet('backupDestination') },
+        ]);
       }
     } finally {
       setBackupBusy(false);
@@ -307,7 +311,7 @@ export default function SettingsScreen() {
   const handleExport = () => {
     Alert.alert(
       'Hassas Veri Uyarısı',
-      'Yedek; ödeme, borç ve profil bilgilerinizi içerir. PIN ve güvenlik ayarları yedeğe eklenmez. Dosyayı yalnızca güvendiğiniz bir konuma gönderin.',
+      'Yedek; ödeme, borç, abonelik ve profil bilgilerinizi içerir. PIN ve güvenlik ayarları yedeğe eklenmez. Dosyayı yalnızca güvendiğiniz bir konuma gönderin.',
       [
         { text: 'İptal', style: 'cancel' },
         { text: 'Yedekle', onPress: () => void performExport() },
@@ -317,23 +321,14 @@ export default function SettingsScreen() {
 
   const handleAutomaticBackupToggle = async (value: boolean) => {
     if (!value) return;
-    if (!settings?.backupDirectoryUri && Platform.OS === 'android') {
-      try {
-        await configureBackupDestination('device', 'Cihaz / Klasör');
-      } catch {
-        Alert.alert('Klasör Seçilmedi', 'Otomatik yedeklemeyi açmak için kayıt klasörünü seçmelisiniz.');
-        return;
-      }
-    }
-    await updateSetting('automaticBackupEnabled', value);
     setBackupBusy(true);
     try {
       await createAutomaticBackup();
+      await updateSetting('automaticBackupEnabled', true);
       await loadSettings();
-      Alert.alert('Otomatik Yedekleme Açıldı', 'İlk yedek seçtiğiniz klasöre oluşturuldu; en yeni 5 kopya saklanacak.');
-    } catch {
-      await updateSetting('automaticBackupEnabled', false);
-      Alert.alert('Yedekleme Açılamadı', 'Cihaz depolama alanı kullanılamıyor.');
+      Alert.alert('Otomatik Yedekleme Açıldı', 'İlk yedek NoX uygulama alanına kaydedildi; en yeni 5 kopya saklanır. Uygulama silinirse bu kopyalar da silinir. “Şimdi Yedekle” ile ayrıca dışarıya kaydedebilirsiniz.');
+    } catch (e) {
+      Alert.alert('Yedekleme Açılamadı', getBackupErrorMessage(e));
     } finally {
       setBackupBusy(false);
     }
@@ -353,17 +348,17 @@ export default function SettingsScreen() {
     try {
       await configureBackupDestination(destination, label);
       await loadSettings();
-      if (destination !== 'share') {
+      if (destination !== 'share' && Platform.OS === 'android') {
         Alert.alert(
           'Kayıt Yeri Bağlandı',
           `${label} için seçtiğiniz hesap/klasör kullanılacak. Sistem ekranında Drive, Dropbox veya OneDrive sağlayıcısından hesap ve klasörü siz belirleyebilirsiniz.`
         );
       }
     } catch (e) {
-      if ((e as Error).message === 'DIRECTORY_PERMISSION_DENIED') {
+      if (isBackupCancelled(e)) {
         Alert.alert('Hedef Değişmedi', 'Hesap veya klasör seçimi tamamlanmadı.');
       } else {
-        Alert.alert('Hedef Bağlanamadı', 'Dosya sağlayıcısı veya seçilen klasör açılamadı.');
+        Alert.alert('Hedef Bağlanamadı', getBackupErrorMessage(e));
       }
     } finally {
       setBackupBusy(false);
@@ -436,7 +431,7 @@ export default function SettingsScreen() {
       await cancelAllNotifications();
       await deleteAllData();
       await deleteSecurePin();
-      await cleanupTemporaryBackups();
+      await clearLocalBackups();
       await clearManagedMedia();
       await loadSettings();
       Alert.alert('Tamamlandı', 'Tüm uygulama verileri, PIN ve geçici yedekler silindi.');
@@ -633,8 +628,10 @@ export default function SettingsScreen() {
                   <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.textMuted} />
                 </View>
               </SettingRow>
+            </>
+          ) : null}
               <View style={styles.divider} />
-              <SettingRow icon="cloud-outline" label="Yedekleme Aracı" onPress={() => setActiveSheet('backupDestination')}>
+              <SettingRow icon="cloud-outline" label="Yedekleme Aracı" onPress={backupBusy ? undefined : () => setActiveSheet('backupDestination')}>
                 <View style={[styles.settingValueRow, { maxWidth: '55%' }]}>
                   <Text style={styles.settingValue} numberOfLines={1}>
                     {settings.backupDirectoryLabel || BACKUP_DESTINATION_LABELS[settings.backupDestination]}
@@ -645,7 +642,7 @@ export default function SettingsScreen() {
               {automaticBackupCount > 0 ? (
                 <>
                   <View style={styles.divider} />
-                  <SettingRow icon="history" label="Otomatik Yedekler" onPress={backupBusy ? undefined : openBackupHistory}>
+                  <SettingRow icon="history" label="Yerel Yedekler" onPress={backupBusy ? undefined : openBackupHistory}>
                     <View style={styles.settingValueRow}>
                       <Text style={styles.settingValue}>{automaticBackupCount} yedek</Text>
                       <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.textMuted} />
@@ -653,8 +650,6 @@ export default function SettingsScreen() {
                   </SettingRow>
                 </>
               ) : null}
-            </>
-          ) : null}
           <View style={styles.divider} />
           <SettingRow icon="backup-restore" label={backupBusy ? 'İşlem Sürüyor...' : 'Şimdi Yedekle'} onPress={backupBusy ? undefined : handleExport}>
             <MaterialCommunityIcons name="chevron-right" size={20} color={Colors.textMuted} />
@@ -706,7 +701,7 @@ export default function SettingsScreen() {
         <Text style={styles.sectionLabel}>HAKKINDA</Text>
         <Card style={styles.settingCard}>
           <SettingRow icon="information" label="NoX Finance">
-            <Text style={styles.settingValue}>v3.1.7</Text>
+            <Text style={styles.settingValue}>v3.1.8</Text>
           </SettingRow>
         </Card>
 
@@ -844,7 +839,7 @@ export default function SettingsScreen() {
             <View style={styles.sheetHandle} />
             <View style={styles.libraryHeader}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.libraryTitle}>Otomatik Yedekler</Text>
+                <Text style={styles.libraryTitle}>Yerel Yedekler</Text>
                 <Text style={styles.librarySubtitle}>Geri yüklemek istediğiniz kopyayı tarihine göre seçin.</Text>
               </View>
               <TouchableOpacity style={styles.sheetClose} onPress={() => setShowBackupHistory(false)}>
@@ -934,7 +929,7 @@ export default function SettingsScreen() {
       <SelectionSheet
         visible={activeSheet === 'backupFrequency'}
         title="Yedek Sıklığı"
-        subtitle="Uygulama açıldığında süresi dolan yerel yedek otomatik oluşturulur."
+        subtitle="Uygulama açıldığında NoX alanında yerel kopya oluşturulur. En yeni 5 kopya saklanır."
         options={[
           { value: 'daily', label: 'Günlük', description: 'Her gün yeni bir güvenli kopya.', icon: 'calendar-today' },
           { value: 'weekly', label: 'Haftalık', description: 'Dengeli depolama kullanımı.', icon: 'calendar-week' },
@@ -948,7 +943,7 @@ export default function SettingsScreen() {
       <SelectionSheet
         visible={activeSheet === 'backupDestination'}
         title="Yedekleme Aracı"
-        subtitle="Bulut hesapları, cihazınızdaki ilgili uygulamanın güvenli paylaşım ekranından bağlanır."
+        subtitle="Elle alınan yedeğin kayıt yerini seçin. Sağlayıcı klasör seçtirmiyorsa Diğer Uygulamalar ile paylaşın."
         options={[
           { value: 'device', label: 'Cihaz / Seçilen Klasör', description: 'Dosyayı telefonunuzda seçeceğiniz klasöre kaydeder.', icon: 'folder-outline', color: Colors.info },
           { value: 'google-drive', label: 'Google Drive', description: 'Drive uygulamasındaki Google hesabınızı kullanır.', icon: 'google-drive', color: '#4285F4' },
