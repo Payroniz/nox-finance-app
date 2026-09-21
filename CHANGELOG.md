@@ -32,4 +32,3 @@ This file records user-facing changes to NoX Finance. Source history for earlier
 
 - A color customization feature has been added to subscription cards
 - You can now choose the image for your subscription cards from both your local files and the pre-installed icons.
-- 
