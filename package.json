@@ -13,7 +13,7 @@
     "build:android": "eas build -p android --profile preview"
   },
   "dependencies": {
-    "@expo-google-fonts/poppins": "^0.2.3",
+    "@expo-google-fonts/poppins": "^0.4.1",
     "@expo/vector-icons": "^15.0.2",
     "@react-native-community/datetimepicker": "9.1.0",
     "date-fns": "^3.6.0",
