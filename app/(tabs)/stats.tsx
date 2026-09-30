@@ -10,10 +10,12 @@ import { getMonthlyStats, getDebts, getPaymentsByMonth, getAllSettings } from '.
 import { formatCurrency } from '../../src/utils/helpers';
 import { Currency, MonthlyStats } from '../../src/constants/types';
 import { CurrencySelector } from '../../src/components/CurrencySelector';
+import { useTabBarInset } from '../../src/components/TabBarInset';
 
 const MONTHS = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 
 export default function StatsScreen() {
+  const tabBarInset = useTabBarInset();
   const now = new Date();
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
@@ -82,7 +84,7 @@ export default function StatsScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: tabBarInset + Spacing.lg }]} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
           <View>

@@ -19,9 +19,9 @@ export const SubscriptionIcon = ({ item, size = 28, color }: {
   return <MaterialCommunityIcons name={icon as keyof typeof MaterialCommunityIcons.glyphMap} size={size} color={color} />;
 };
 
-type Props = { item: SubscriptionInput; date?: string; onPress?: () => void; onEdit?: () => void; onDelete?: () => void; disabled?: boolean; preview?: boolean };
+type Props = { item: SubscriptionInput; categoryName?: string; date?: string; onPress?: () => void; onEdit?: () => void; onDelete?: () => void; disabled?: boolean; preview?: boolean };
 
-export const SubscriptionCard = ({ item, date, onPress, onEdit, onDelete, disabled, preview }: Props) => {
+export const SubscriptionCard = ({ item, categoryName, date, onPress, onEdit, onDelete, disabled, preview }: Props) => {
   const background = normalizeHexColor(item.color) ?? DEFAULT_SUBSCRIPTION_COLOR;
   const foreground = getContrastColor(background);
   const text = { color: foreground };
@@ -35,6 +35,7 @@ export const SubscriptionCard = ({ item, date, onPress, onEdit, onDelete, disabl
       </View>
       {preview && <Text style={[styles.detail, text]}>Önizleme</Text>}
     </View>
+    {!!categoryName && <View style={styles.category}><MaterialCommunityIcons name="tag-outline" size={14} color={foreground} /><Text style={[styles.detail, text]}>{categoryName}</Text></View>}
     <Text style={[styles.amount, text]}>{formatCurrency(item.amount, item.currency)} <Text style={styles.detail}>/ {SUBSCRIPTION_CYCLES[item.billing_cycle].toLocaleLowerCase('tr-TR')}</Text></Text>
     <Text style={[styles.detail, text]}>{!item.active ? 'Takip duraklatıldı' : `${date ? 'Yenileme' : 'Sonraki yenileme'}: ${formatDate(date ?? getNextRenewal(item))}`}</Text>
     {!!item.notes && <Text style={[styles.notes, text]} numberOfLines={2}>{item.notes}</Text>}
@@ -49,6 +50,7 @@ export const SubscriptionCard = ({ item, date, onPress, onEdit, onDelete, disabl
 };
 
 const styles = StyleSheet.create({
+  category: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 12 },
   card: { borderWidth: 1, borderRadius: 20, padding: 16, marginBottom: 12 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   flex: { flex: 1 },

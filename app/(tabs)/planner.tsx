@@ -8,6 +8,7 @@ import { getAllSettings, getDebts, getPayments, getSubscriptions } from '../../s
 import { formatCurrency, parseLocalDate } from '../../src/utils/helpers';
 import { getMonthlySubscriptionTotals, getSubscriptionOccurrences } from '../../src/utils/subscriptions';
 import { CurrencySelector } from '../../src/components/CurrencySelector';
+import { useTabBarInset } from '../../src/components/TabBarInset';
 
 type FlowItem = {
   id: string;
@@ -22,6 +23,7 @@ type FlowItem = {
 const HORIZONS = [7, 30, 90] as const;
 
 export default function PlannerScreen() {
+  const tabBarInset = useTabBarInset();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [debts, setDebts] = useState<Debt[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
@@ -77,7 +79,7 @@ export default function PlannerScreen() {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: tabBarInset + Spacing.lg }]} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <View>
             <Text style={styles.eyebrow}>AKILLI NAKİT AKIŞI</Text>

@@ -1,959 +1,244 @@
-import React, { useState, useCallback } from 'react';
-import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  RefreshControl, StatusBar, Modal
-} from 'react-native';
+import React, { useCallback, useRef, useState } from 'react';
+import { ActivityIndicator, Modal, Pressable, RefreshControl, ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useFocusEffect, router } from 'expo-router';
-import * as Haptics from 'expo-haptics';
-import { Colors, Spacing, BorderRadius, FontSize, Shadow } from '../../src/constants/theme';
-import { Card } from '../../src/components/Card';
-import { PaymentCard } from '../../src/components/PaymentCard';
-import {
-  getMonthlyStats, getUpcomingPayments, updatePaymentStatus,
-  deletePayment, getAllSettings, getDebts, getPayments, getSubscriptions,
-} from '../../src/db/database';
-import {
-  formatCurrency,
-  formatDate,
-  formatLocalDateKey,
-  getDueDateLabel,
-  getGreeting,
-  parseLocalDate,
-} from '../../src/utils/helpers';
-import { Currency, Payment, Subscription } from '../../src/constants/types';
-import { cancelNotification } from '../../src/utils/notifications';
-import { getNextRenewal, getSubscriptionOccurrences } from '../../src/utils/subscriptions';
+import { router, useFocusEffect } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Colors } from '../../src/constants/theme';
+import { Category, Currency, Debt, Payment, Subscription } from '../../src/constants/types';
+import { getAllSettings, getCategories, getDebts, getPayments, getSubscriptions, updatePaymentStatus } from '../../src/db/database';
 import { CurrencySelector } from '../../src/components/CurrencySelector';
-import { SubscriptionCard } from '../../src/components/SubscriptionCard';
+import { useTabBarInset } from '../../src/components/TabBarInset';
+import { formatCurrency, formatDate, formatLocalDateKey, getGreeting } from '../../src/utils/helpers';
+import { calculateMonthlyStats } from '../../src/utils/expenses';
+import { buildDashboardEvents, DashboardEvent, getDashboardSummary } from '../../src/utils/dashboard';
+import { getMonthlySubscriptionTotals } from '../../src/utils/subscriptions';
+import { cancelNotification } from '../../src/utils/notifications';
 
-type InAppNotification = {
-  id: string;
-  entityId: number;
-  route: 'payment' | 'debt' | 'subscription';
-  title: string;
-  name: string;
-  amount: string;
-  detail: string;
-  color: string;
-  icon: string;
-  dueDate: number;
+type DashboardData = { payments: Payment[]; subscriptions: Subscription[]; debts: Debt[]; categories: Category[] };
+const eventColor = (event: DashboardEvent) => event.overdue ? Colors.danger : event.receivable ? Colors.success
+  : event.kind === 'subscription' ? '#AAA3FF' : event.kind === 'debt' ? '#E8AA6B' : Colors.info;
+const eventIcon = (event: DashboardEvent): keyof typeof MaterialCommunityIcons.glyphMap => event.kind === 'subscription' ? 'repeat'
+  : event.kind === 'payment' ? 'credit-card-outline' : event.receivable ? 'arrow-bottom-left' : 'arrow-top-right';
+const openEvent = (event: DashboardEvent) => {
+  if (event.kind === 'subscription') router.push({ pathname: '/(tabs)/subscriptions', params: { edit: event.entityId } });
+  else if (event.kind === 'payment') router.push(`/payment/${event.entityId}`);
+  else router.push(`/debt/${event.entityId}`);
 };
 
-export default function Dashboard() {
-  const [stats, setStats] = useState<any>(null);
-  const [prevStats, setPrevStats] = useState<any>(null);
-  const [upcomingPayments, setUpcomingPayments] = useState<Payment[]>([]);
-  const [upcomingSubscriptions, setUpcomingSubscriptions] = useState<Subscription[]>([]);
-  const [overduePayments, setOverduePayments] = useState<Payment[]>([]);
-  const [userName, setUserName] = useState('Kullanıcı');
-  const [refreshing, setRefreshing] = useState(false);
-  const [showNotifPanel, setShowNotifPanel] = useState(false);
-  const [notifications, setNotifications] = useState<InAppNotification[]>([]);
-  const [debtSummary, setDebtSummary] = useState({ totalOwe: 0, totalOwed: 0, netDebt: 0 });
-  const [currency, setCurrency] = useState<'TRY' | 'USD' | 'EUR' | 'GBP'>('TRY');
-  const [selectedCurrency, setSelectedCurrency] = useState<Currency | null>(null);
-
-  const today = new Date();
-  const greeting = getGreeting();
-
-  const buildNotifications = async () => {
-    const horizon = new Date();
-    horizon.setDate(horizon.getDate() + 7);
-    const horizonKey = formatLocalDateKey(horizon);
-    const [payments, oweDebts, owedDebts, subscriptions] = await Promise.all([
-      getPayments(),
-      getDebts('owe'),
-      getDebts('owed'),
-      getSubscriptions(),
-    ]);
-    const notifs: InAppNotification[] = [];
-    for (const { id, date, subscription } of getSubscriptionOccurrences(subscriptions, new Date(), horizon)) {
-      notifs.push({ id, entityId: subscription.id, route: 'subscription', title: 'Abonelik yenileniyor', name: subscription.name,
-        amount: formatCurrency(subscription.amount, subscription.currency), detail: `${formatDate(date)} · Abonelik`,
-        color: Colors.info, icon: 'repeat', dueDate: parseLocalDate(date)!.getTime() });
-    }
-
-    payments
-      .filter(payment => payment.status !== 'paid' && payment.due_date <= horizonKey)
-      .forEach(payment => {
-        const due = parseLocalDate(payment.due_date);
-        if (!due) return;
-        const overdue = due.getTime() < new Date().setHours(0, 0, 0, 0);
-        notifs.push({
-          id: `payment-${payment.id}`,
-          entityId: payment.id,
-          route: 'payment',
-          title: overdue ? 'Gecikmiş ödeme' : 'Ödeme yaklaşıyor',
-          name: payment.name,
-          amount: formatCurrency(payment.amount, payment.currency),
-          detail: `${getDueDateLabel(payment.due_date)} · ${formatDate(payment.due_date, 'dd MMMM')} · ${payment.due_time} · ${payment.category}`,
-          color: overdue ? Colors.danger : Colors.primary,
-          icon: overdue ? 'alert-circle' : 'clock-alert-outline',
-          dueDate: due.getTime(),
-        });
-      });
-
-    [...oweDebts, ...owedDebts]
-      .filter(debt => debt.due_date && debt.total_amount > debt.paid_amount && debt.due_date <= horizonKey)
-      .forEach(debt => {
-        const due = parseLocalDate(debt.due_date);
-        if (!due) return;
-        const overdue = due.getTime() < new Date().setHours(0, 0, 0, 0);
-        const receivable = debt.debt_direction === 'owed';
-        notifs.push({
-          id: `debt-${debt.id}`,
-          entityId: debt.id,
-          route: 'debt',
-          title: overdue ? (receivable ? 'Gecikmiş alacak' : 'Gecikmiş borç') : (receivable ? 'Alacak yaklaşıyor' : 'Borç yaklaşıyor'),
-          name: debt.person_name,
-          amount: formatCurrency(debt.total_amount - debt.paid_amount, debt.currency),
-          detail: `${getDueDateLabel(debt.due_date)} · ${formatDate(debt.due_date, 'dd MMMM yyyy')}`,
-          color: overdue ? Colors.danger : (receivable ? Colors.success : Colors.warning),
-          icon: receivable ? 'arrow-down-circle' : 'arrow-up-circle',
-          dueDate: due.getTime(),
-        });
-      });
-
-    setNotifications(notifs.sort((a, b) => a.dueDate - b.dueDate));
-  };
-
-  const loadData = async () => {
-    try {
-      const now = new Date();
-      const prevMonth = now.getMonth() === 0 ? 12 : now.getMonth();
-      const prevYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
-
-      const settings = await getAllSettings();
-      const unit = selectedCurrency ?? settings.defaultCurrency;
-      const [monthlyStats, prevMonthStats, upcoming, oweDebts, owedDebts, allPayments, subscriptions] = await Promise.all([
-        getMonthlyStats(now.getFullYear(), now.getMonth() + 1, unit),
-        getMonthlyStats(prevYear, prevMonth, unit),
-        getUpcomingPayments(5),
-        getDebts('owe'),
-        getDebts('owed'),
-        getPayments(),
-        getSubscriptions(),
-      ]);
-
-      setStats(monthlyStats);
-      setPrevStats(prevMonthStats);
-      setUpcomingPayments(upcoming.filter(p => p.status !== 'overdue').slice(0, 3));
-      setUpcomingSubscriptions(subscriptions.filter(item => item.active === 1)
-        .sort((a, b) => getNextRenewal(a).localeCompare(getNextRenewal(b))).slice(0, 3));
-      setOverduePayments(allPayments.filter(p => p.status === 'overdue'));
-      setUserName(settings.userName);
-      setCurrency(unit);
-
-      const totalOwe = oweDebts.filter(d => d.currency === unit).reduce((s, d) => s + (d.total_amount - d.paid_amount), 0);
-      const totalOwed = owedDebts.filter(d => d.currency === unit).reduce((s, d) => s + (d.total_amount - d.paid_amount), 0);
-      setDebtSummary({ totalOwe, totalOwed, netDebt: totalOwed - totalOwe });
-
-      await buildNotifications();
-    } catch (e) {
-      console.error('Dashboard load error:', e);
-    }
-  };
-
-  useFocusEffect(useCallback(() => { loadData(); }, [selectedCurrency]));
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
-  };
-
-  const handleMarkPaid = async (id: number) => {
-    const payment = (await getPayments()).find(item => item.id === id);
-    if (payment?.notification_id) await cancelNotification(payment.notification_id);
-    await updatePaymentStatus(id, 'paid');
-    await loadData();
-  };
-
-  const handleDeletePayment = async (id: number) => {
-    const payment = (await getPayments()).find(item => item.id === id);
-    if (payment?.notification_id) await cancelNotification(payment.notification_id);
-    await deletePayment(id);
-    await loadData();
-  };
-
-  const monthChange = stats && prevStats && prevStats.totalExpense > 0
-    ? ((stats.totalExpense - prevStats.totalExpense) / prevStats.totalExpense) * 100
-    : null;
-
-  const totalPayments = (stats?.paidCount ?? 0) + (stats?.pendingCount ?? 0) + (stats?.overdueCount ?? 0);
-  const completionRate = totalPayments > 0 ? Math.round((stats?.paidCount ?? 0) / totalPayments * 100) : 0;
-
-  const SparkBar = ({ value, max, color }: { value: number; max: number; color: string }) => (
-    <View style={sparkStyles.track}>
-      <View style={[sparkStyles.fill, { width: `${Math.max((value / max) * 100, 3)}%`, backgroundColor: color }]} />
-    </View>
-  );
-
-  return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
-
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} />}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* ── HEADER ── */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>{greeting}, {userName} 👋</Text>
-            <Text style={styles.date}>
-              {today.toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' })}
-            </Text>
-          </View>
-          <TouchableOpacity style={styles.notifBtn} onPress={() => setShowNotifPanel(true)}>
-            <MaterialCommunityIcons
-              name={notifications.length > 0 ? 'bell-badge' : 'bell-outline'}
-              size={24}
-              color={notifications.length > 0 ? Colors.primary : Colors.textSecondary}
-            />
-            {notifications.length > 0 && (
-              <View style={styles.notifBadge}>
-                <Text style={styles.notifBadgeText}>{notifications.length > 9 ? '9+' : notifications.length}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        {/* ── OVERDUE ALERT BANNER ── */}
-        {overduePayments.length > 0 && (
-          <TouchableOpacity
-            style={styles.overdueBanner}
-            onPress={() => router.push('/(tabs)/payments')}
-            activeOpacity={0.85}
-          >
-            <View style={styles.overdueBannerLeft}>
-              <MaterialCommunityIcons name="alert-circle" size={20} color="#fff" />
-              <Text style={styles.overdueBannerText}>
-                {overduePayments.length} gecikmiş ödeme var
-              </Text>
-            </View>
-            <MaterialCommunityIcons name="chevron-right" size={18} color="rgba(255,255,255,0.7)" />
-          </TouchableOpacity>
-        )}
-
-        <CurrencySelector value={selectedCurrency ?? currency} onChange={setSelectedCurrency} />
-        {/* ── HERO CARD ── */}
-        <View style={styles.heroCard}>
-          <View style={styles.heroTop}>
-            <Text style={styles.heroLabel}>Bu Ay Toplam Gider</Text>
-            {monthChange !== null && (
-              <View style={[styles.changePill, { backgroundColor: monthChange > 0 ? `${Colors.danger}25` : `${Colors.success}25` }]}>
-                <MaterialCommunityIcons
-                  name={monthChange > 0 ? 'trending-up' : 'trending-down'}
-                  size={13}
-                  color={monthChange > 0 ? Colors.danger : Colors.success}
-                />
-                <Text style={[styles.changeText, { color: monthChange > 0 ? Colors.danger : Colors.success }]}>
-                  {Math.abs(monthChange).toFixed(1)}%
-                </Text>
-              </View>
-            )}
-          </View>
-
-          <Text style={styles.heroAmount}>
-            {stats ? formatCurrency(stats.totalExpense, currency) : '—'}
-          </Text>
-          <Text style={styles.heroLabel}>{stats?.subscriptionCount ?? 0} abonelik yenilemesi • {formatCurrency(stats?.subscriptionExpense ?? 0, currency)} dahil</Text>
-
-          {/* Completion bar */}
-          <View style={styles.completionRow}>
-            <View style={styles.completionBarTrack}>
-              <View style={[styles.completionBarFill, { width: `${completionRate}%` }]} />
-            </View>
-            <Text style={styles.completionPct}>Ödemeler: %{completionRate}</Text>
-          </View>
-
-          <View style={styles.heroStats}>
-            <View style={styles.heroStatItem}>
-              <View style={[styles.heroStatDot, { backgroundColor: Colors.success }]} />
-              <Text style={styles.heroStatText}>{stats?.paidCount ?? 0} ödendi</Text>
-            </View>
-            <View style={styles.heroStatItem}>
-              <View style={[styles.heroStatDot, { backgroundColor: Colors.primary }]} />
-              <Text style={styles.heroStatText}>{stats?.pendingCount ?? 0} bekliyor</Text>
-            </View>
-            <View style={styles.heroStatItem}>
-              <View style={[styles.heroStatDot, { backgroundColor: Colors.danger }]} />
-              <Text style={styles.heroStatText}>{stats?.overdueCount ?? 0} gecikti</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* ── QUICK ACTIONS ── */}
-        <View style={styles.quickRow}>
-          <TouchableOpacity
-            style={[styles.quickBtn, { backgroundColor: Colors.primary }]}
-            onPress={() => { Haptics.impactAsync(); router.push('/payment/add'); }}
-            activeOpacity={0.85}
-          >
-            <MaterialCommunityIcons name="plus-circle-outline" size={22} color="#fff" />
-            <Text style={styles.quickBtnText}>Ödeme Ekle</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.quickBtn, { backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder }]}
-            onPress={() => { Haptics.impactAsync(); router.push('/debt/add'); }}
-            activeOpacity={0.85}
-          >
-            <MaterialCommunityIcons name="hand-coin-outline" size={22} color={Colors.primary} />
-            <Text style={[styles.quickBtnText, { color: Colors.primary }]}>Borç Ekle</Text>
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity style={styles.plannerBanner} activeOpacity={0.86} onPress={() => router.push('/(tabs)/planner' as any)}>
-          <View style={styles.plannerIconWrap}>
-            <MaterialCommunityIcons name="timeline-clock-outline" size={27} color="#fff" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.plannerEyebrow}>YENİ • AKILLI FİNANS PLANI</Text>
-            <Text style={styles.plannerTitle}>Önündeki 90 günü gör</Text>
-            <Text style={styles.plannerText}>Ödeme, abonelik, borç ve alacakları tek akışta keşfet.</Text>
-          </View>
-          <MaterialCommunityIcons name="arrow-top-right" size={21} color={Colors.primaryLight} />
-        </TouchableOpacity>
-
-        {/* ── NET FINANCIAL SNAPSHOT ── */}
-        <Card style={styles.snapshotCard}>
-          <View style={styles.snapshotHeader}>
-            <Text style={styles.sectionTitle}>Finansal Durum</Text>
-            <TouchableOpacity onPress={() => router.push('/(tabs)/stats')}>
-              <Text style={styles.seeAll}>Detaylı →</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.snapshotRow}>
-            {/* Borcum */}
-            <View style={styles.snapshotItem}>
-              <View style={[styles.snapshotIcon, { backgroundColor: `${Colors.danger}20` }]}>
-                <MaterialCommunityIcons name="arrow-up-circle" size={18} color={Colors.danger} />
-              </View>
-              <Text style={styles.snapshotLabel}>Borcum</Text>
-              <Text style={[styles.snapshotAmount, { color: Colors.danger }]} numberOfLines={1}>
-                {formatCurrency(debtSummary.totalOwe, currency)}
-              </Text>
-            </View>
-
-            {/* Divider */}
-            <View style={styles.snapshotDivider} />
-
-            {/* Net */}
-            <View style={styles.snapshotItem}>
-              <View style={[styles.snapshotIcon, { backgroundColor: debtSummary.netDebt >= 0 ? `${Colors.success}20` : `${Colors.danger}20` }]}>
-                <MaterialCommunityIcons
-                  name={debtSummary.netDebt >= 0 ? 'scale-balance' : 'scale-unbalanced'}
-                  size={18}
-                  color={debtSummary.netDebt >= 0 ? Colors.success : Colors.danger}
-                />
-              </View>
-              <Text style={styles.snapshotLabel}>Net</Text>
-              <Text style={[styles.snapshotAmount, { color: debtSummary.netDebt >= 0 ? Colors.success : Colors.danger }]} numberOfLines={1}>
-                {debtSummary.netDebt >= 0 ? '+' : '-'}{formatCurrency(Math.abs(debtSummary.netDebt), currency)}
-              </Text>
-            </View>
-
-            {/* Divider */}
-            <View style={styles.snapshotDivider} />
-
-            {/* Alacağım */}
-            <View style={styles.snapshotItem}>
-              <View style={[styles.snapshotIcon, { backgroundColor: `${Colors.success}20` }]}>
-                <MaterialCommunityIcons name="arrow-down-circle" size={18} color={Colors.success} />
-              </View>
-              <Text style={styles.snapshotLabel}>Alacağım</Text>
-              <Text style={[styles.snapshotAmount, { color: Colors.success }]} numberOfLines={1}>
-                {formatCurrency(debtSummary.totalOwed, currency)}
-              </Text>
-            </View>
-          </View>
-        </Card>
-
-        {/* ── CATEGORY SPENDING BARS ── */}
-        {stats?.categoryBreakdown?.length > 0 && (
-          <Card style={styles.sectionCard}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Kategoriler</Text>
-              <TouchableOpacity onPress={() => router.push('/(tabs)/stats')}>
-                <Text style={styles.seeAll}>Tümü →</Text>
-              </TouchableOpacity>
-            </View>
-            {stats.categoryBreakdown.slice(0, 4).map((cat: any, i: number) => {
-              const pct = stats.totalExpense > 0 ? (cat.amount / stats.totalExpense) * 100 : 0;
-              return (
-                <View key={i} style={styles.catRow}>
-                  <View style={[styles.catDot, { backgroundColor: cat.color }]} />
-                  <Text style={styles.catName} numberOfLines={1}>{cat.category}</Text>
-                  <SparkBar value={cat.amount} max={stats.totalExpense} color={cat.color} />
-                  <Text style={[styles.catPct, { color: cat.color }]}>{Math.round(pct)}%</Text>
-                  <Text style={styles.catAmt} numberOfLines={1}>{formatCurrency(cat.amount, currency)}</Text>
-                </View>
-              );
-            })}
-          </Card>
-        )}
-
-        {/* ── UPCOMING PAYMENTS ── */}
-        <View style={[styles.sectionHeader, { marginBottom: Spacing.sm }]}>
-          <Text style={styles.sectionTitle}>Yaklaşan Ödemeler</Text>
-          <TouchableOpacity onPress={() => router.push('/(tabs)/payments')}>
-            <Text style={styles.seeAll}>Tümünü Gör →</Text>
-          </TouchableOpacity>
-        </View>
-
-        {upcomingPayments.length === 0 ? (
-          <Card style={styles.emptyCard}>
-            <MaterialCommunityIcons name="calendar-check" size={36} color={Colors.success} />
-            <Text style={styles.emptyTitle}>Yaklaşan ödeme yok</Text>
-            <Text style={styles.emptySubtitle}>{upcomingSubscriptions.length ? 'Abonelik yenilemelerini aşağıda görebilirsin.' : 'Kayıtlı ödemeleriniz güncel 🎉'}</Text>
-          </Card>
-        ) : (
-          upcomingPayments.map(p => (
-            <PaymentCard
-              key={p.id}
-              payment={p}
-              onMarkPaid={handleMarkPaid}
-              onDelete={handleDeletePayment}
-              onPress={(payment) => router.push(`/payment/${payment.id}`)}
-            />
-          ))
-        )}
-
-        {upcomingSubscriptions.length > 0 && <>
-          <View style={[styles.sectionHeader, { marginVertical: Spacing.md }]}>
-            <Text style={styles.sectionTitle}>Yaklaşan Abonelikler</Text>
-            <TouchableOpacity onPress={() => router.push('/(tabs)/subscriptions')}><Text style={styles.seeAll}>Tümü →</Text></TouchableOpacity>
-          </View>
-          {upcomingSubscriptions.map(item => <SubscriptionCard key={item.id} item={item}
-            onPress={() => router.push({ pathname: '/(tabs)/subscriptions', params: { edit: item.id } })} />)}
-        </>}
-        {/* ── WEEKLY SPARKLINE ── */}
-        {stats?.weeklyData && (
-          <Card style={[styles.sectionCard, { marginTop: Spacing.lg }]}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Günlere Göre Gider</Text>
-              <Text style={styles.weekTotal}>
-                {formatCurrency(stats.weeklyData.reduce((s: number, d: any) => s + d.amount, 0), currency)}
-              </Text>
-            </View>
-            <View style={styles.weekChart}>
-              {(() => {
-                const maxVal = Math.max(...stats.weeklyData.map((d: any) => d.amount), 1);
-                return stats.weeklyData.map((d: any, i: number) => (
-                  <View key={i} style={styles.weekCol}>
-                    <View style={styles.weekBarTrack}>
-                      <View style={[
-                        styles.weekBar,
-                        {
-                          height: `${Math.max((d.amount / maxVal) * 100, 4)}%`,
-                          backgroundColor: d.amount === Math.max(...stats.weeklyData.map((x: any) => x.amount))
-                            ? Colors.primary
-                            : Colors.surfaceBorder,
-                        }
-                      ]} />
-                    </View>
-                    <Text style={styles.weekDay}>{d.day}</Text>
-                  </View>
-                ));
-              })()}
-            </View>
-          </Card>
-        )}
-
-        <View style={{ height: 32 }} />
-      </ScrollView>
-
-      {/* ── NOTIFICATION PANEL ── */}
-      <Modal
-        visible={showNotifPanel}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowNotifPanel(false)}
-      >
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowNotifPanel(false)}>
-          <View style={styles.notifPanel}>
-            <View style={styles.notifPanelHeader}>
-              <View>
-                <Text style={styles.notifPanelTitle}>Bildirim Merkezi</Text>
-                <Text style={styles.notifPanelSubtitle}>{notifications.length} finansal hareket dikkat bekliyor</Text>
-              </View>
-              <TouchableOpacity onPress={() => setShowNotifPanel(false)}>
-                <MaterialCommunityIcons name="close" size={22} color={Colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-            {notifications.length === 0 ? (
-              <View style={styles.notifEmpty}>
-                <MaterialCommunityIcons name="bell-check-outline" size={48} color={Colors.textMuted} />
-                <Text style={styles.notifEmptyText}>Bildirim yok</Text>
-                <Text style={styles.notifEmptySubText}>Yaklaşan ödeme veya borç bulunamadı</Text>
-              </View>
-            ) : (
-              <ScrollView showsVerticalScrollIndicator={false}>
-                {notifications.map(n => (
-                  <TouchableOpacity
-                    key={n.id}
-                    style={[styles.notifItem, { borderLeftColor: n.color }]}
-                    activeOpacity={0.78}
-                    onPress={() => {
-                      setShowNotifPanel(false);
-                      if (n.route === 'subscription') router.push({ pathname: '/(tabs)/subscriptions', params: { edit: n.entityId } });
-                      else router.push(n.route === 'payment' ? `/payment/${n.entityId}` : `/debt/${n.entityId}`);
-                    }}
-                  >
-                    <View style={[styles.notifItemIcon, { backgroundColor: `${n.color}1F` }]}>
-                      <MaterialCommunityIcons name={n.icon as any} size={22} color={n.color} />
-                    </View>
-                    <View style={styles.notifItemText}>
-                      <View style={styles.notifItemTopRow}>
-                        <Text style={[styles.notifItemType, { color: n.color }]}>{n.title}</Text>
-                        <Text style={styles.notifItemAmount}>{n.amount}</Text>
-                      </View>
-                      <Text style={styles.notifItemTitle}>{n.name}</Text>
-                      <Text style={styles.notifItemBody}>{n.detail}</Text>
-                    </View>
-                    <MaterialCommunityIcons name="chevron-right" size={18} color={Colors.textMuted} />
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            )}
-          </View>
-        </TouchableOpacity>
-      </Modal>
-    </View>
-  );
+function EventRow({ event, onPress, onPaid, busy }: { event: DashboardEvent; onPress: () => void; onPaid?: () => void; busy?: boolean }) {
+  const color = eventColor(event);
+  const today = formatLocalDateKey(new Date());
+  return <View style={styles.eventRow}>
+    <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${event.name}, ${event.label}, ${formatCurrency(event.amount, event.currency)}, ${formatDate(event.date)}`}
+      onPress={onPress} style={styles.eventLink}>
+      <View style={[styles.eventIcon, { backgroundColor: `${color}15` }]}><MaterialCommunityIcons name={eventIcon(event)} size={22} color={color} /></View>
+      <View style={styles.flex}>
+        <Text numberOfLines={1} style={styles.eventName}>{event.name}</Text>
+        <Text style={styles.caption}>{event.label} · <Text style={event.overdue ? { color: Colors.danger } : undefined}>{event.overdue ? 'Gecikti · ' : ''}{event.date === today ? 'Bugün' : formatDate(event.date, 'dd MMM')}</Text></Text>
+      </View>
+      <Text style={[styles.eventAmount, event.receivable && { color: Colors.success }]}>{event.receivable ? '+' : ''}{formatCurrency(event.amount, event.currency)}</Text>
+      {!onPaid && <MaterialCommunityIcons name="chevron-right" size={17} color={Colors.textMuted} />}
+    </TouchableOpacity>
+    {onPaid && <TouchableOpacity accessibilityRole="button" accessibilityLabel={`${event.name} ödendi olarak işaretle`} disabled={busy} onPress={onPaid} style={styles.paidButton}>
+      {busy ? <ActivityIndicator size="small" color={Colors.success} /> : <MaterialCommunityIcons name="check-circle-outline" size={24} color={Colors.success} />}
+    </TouchableOpacity>}
+  </View>;
 }
 
-const sparkStyles = StyleSheet.create({
-  track: {
-    flex: 1,
-    height: 6,
-    backgroundColor: Colors.surfaceBorder,
-    borderRadius: BorderRadius.full,
-    overflow: 'hidden',
-    marginHorizontal: Spacing.sm,
-  },
-  fill: {
-    height: '100%',
-    borderRadius: BorderRadius.full,
-    minWidth: 4,
-  },
-});
+export default function Dashboard() {
+  const tabBarInset = useTabBarInset();
+  const insets = useSafeAreaInsets();
+  const [data, setData] = useState<DashboardData>({ payments: [], subscriptions: [], debts: [], categories: [] });
+  const [userName, setUserName] = useState('Kullanıcı');
+  const [defaultCurrency, setDefaultCurrency] = useState<Currency>('TRY');
+  const [selectedCurrency, setSelectedCurrency] = useState<Currency | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState('');
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [eventFilter, setEventFilter] = useState<'upcoming' | 'overdue'>('upcoming');
+  const [busyPayment, setBusyPayment] = useState<number | null>(null);
+  const busyRef = useRef(false);
+  const requestRef = useRef(0);
+  const currency = selectedCurrency ?? defaultCurrency;
+
+  const load = useCallback(async () => {
+    const request = ++requestRef.current;
+    try {
+      const [payments, subscriptions, owe, owed, categories, settings] = await Promise.all([
+        getPayments(), getSubscriptions(), getDebts('owe'), getDebts('owed'), getCategories(), getAllSettings(),
+      ]);
+      if (request !== requestRef.current) return;
+      setData({ payments, subscriptions, debts: [...owe, ...owed], categories });
+      setUserName(settings.userName); setDefaultCurrency(settings.defaultCurrency); setError('');
+    } catch { if (request === requestRef.current) setError('Bilgiler yüklenemedi. Yeniden denemek için dokun.'); }
+    finally { if (request === requestRef.current) { setLoading(false); setRefreshing(false); } }
+  }, []);
+  useFocusEffect(useCallback(() => { void load(); return () => { requestRef.current++; }; }, [load]));
+  const markPaid = async (event: DashboardEvent) => {
+    if (busyRef.current) return;
+    busyRef.current = true; setBusyPayment(event.entityId);
+    try {
+      const payment = data.payments.find(item => item.id === event.entityId);
+      if (payment?.notification_id) await cancelNotification(payment.notification_id);
+      await updatePaymentStatus(event.entityId, 'paid'); await load();
+    } catch { setError('Ödeme güncellenemedi. Yeniden deneyin.'); }
+    finally { busyRef.current = false; setBusyPayment(null); }
+  };
+
+  const now = new Date();
+  const stats = calculateMonthlyStats(data.payments, data.subscriptions, data.categories, now.getFullYear(), now.getMonth() + 1, currency);
+  const previousDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const previous = calculateMonthlyStats(data.payments, data.subscriptions, data.categories, previousDate.getFullYear(), previousDate.getMonth() + 1, currency);
+  const summary = getDashboardSummary(data.payments, data.debts, currency, now);
+  const events = buildDashboardEvents(data.payments, data.subscriptions, data.debts, now);
+  const currencyEvents = events.filter(item => item.currency === currency);
+  const upcoming = currencyEvents.filter(item => !item.overdue);
+  const overdue = currencyEvents.filter(item => item.overdue);
+  const visibleEvents = eventFilter === 'upcoming' ? upcoming : overdue;
+  const outflow = visibleEvents.filter(item => !item.receivable).reduce((sum, item) => sum + item.amount, 0);
+  const change = previous.totalExpense > 0 ? Math.round((stats.totalExpense - previous.totalExpense) / previous.totalExpense * 100) : null;
+  const activeSubscriptions = data.subscriptions.filter(item => item.active === 1 && item.currency === currency);
+  const monthlyEstimate = getMonthlySubscriptionTotals(activeSubscriptions)[currency] ?? 0;
+
+  return <View style={[styles.container, { paddingTop: insets.top }]}>
+    <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+    <ScrollView contentContainerStyle={[styles.content, { paddingBottom: tabBarInset + 20 }]} showsVerticalScrollIndicator={false}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); void load(); }} tintColor={Colors.primaryLight} />}>
+      <View style={styles.header}>
+        <View style={styles.flex}><Text style={styles.greeting}>{getGreeting()}, {userName}</Text><Text style={styles.pageTitle}>NoX Finance App</Text><Text style={styles.caption}>{formatDate(formatLocalDateKey(now), 'd MMMM yyyy, EEEE')}</Text></View>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Bildirimler, ${events.length} işlem`} onPress={() => setShowNotifications(true)} style={styles.notificationButton}>
+          <MaterialCommunityIcons name="bell-outline" size={23} color={Colors.textPrimary} />
+          {events.length > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{events.length > 9 ? '9+' : events.length}</Text></View>}
+        </TouchableOpacity>
+      </View>
+      <CurrencySelector value={currency} onChange={setSelectedCurrency} />
+      {!!error && <TouchableOpacity accessibilityRole="button" onPress={() => void load()} style={styles.error}><Text style={styles.errorText}>{error}</Text></TouchableOpacity>}
+      {loading ? <View style={styles.loading}><ActivityIndicator color={Colors.primaryLight} size="large" /><Text style={styles.caption}>Finansal özetin hazırlanıyor</Text></View> : <>
+        <View style={styles.hero}>
+          <View style={styles.rowBetween}><View style={styles.row}><View style={styles.heroDot} /><Text style={styles.eyebrow}>AYLIK GÖRÜNÜM</Text></View><Text style={styles.month}>{formatDate(formatLocalDateKey(now), 'MMMM yyyy')}</Text></View>
+          <Text style={styles.heroAmount} adjustsFontSizeToFit numberOfLines={1}>{formatCurrency(stats.totalExpense, currency)}</Text>
+          <View style={styles.rowBetween}><Text style={styles.heroCaption}>Bu ayın toplam gideri</Text>{change !== null && <View style={styles.change}><MaterialCommunityIcons name={change > 0 ? 'trending-up' : change < 0 ? 'trending-down' : 'minus'} size={14} color="#D6D0FF" /><Text style={styles.changeText}>%{Math.abs(change)}</Text></View>}</View>
+          <Text style={styles.heroHint}>{change !== null ? 'Değişim geçen ayın tamamına göredir.' : 'Ödemeler ve bu aya ait abonelik yenilemeleri.'}</Text>
+          <View style={styles.distribution}>{[
+            { value: summary.paidAmount, color: '#7DDDB0' }, { value: summary.pendingAmount, color: '#F4C182' }, { value: stats.subscriptionExpense, color: '#B3A5FF' },
+          ].map((part, index) => part.value > 0 && <View key={index} style={{ width: `${part.value / stats.totalExpense * 100}%`, backgroundColor: part.color, height: 5 }} />)}</View>
+          <View style={styles.heroDetails}>{[
+            { label: 'Ödendi', amount: summary.paidAmount, color: '#7DDDB0' },
+            { label: 'Bekleyen', amount: summary.pendingAmount, color: '#F4C182' },
+            { label: 'Abonelik', amount: stats.subscriptionExpense, color: '#B3A5FF' },
+          ].map(item => <View style={styles.flex} key={item.label}><View style={styles.row}><View style={[styles.dot, { backgroundColor: item.color }]} /><Text style={styles.heroCaption}>{item.label}</Text></View><Text adjustsFontSizeToFit numberOfLines={1} style={styles.heroDetailAmount}>{formatCurrency(item.amount, currency)}</Text></View>)}</View>
+          <TouchableOpacity accessibilityRole="button" style={styles.heroFooter} onPress={() => router.push('/(tabs)/stats')}><Text style={styles.heroCaption}>{summary.paidCount}/{summary.paymentCount} ödeme tamamlandı</Text><View style={styles.row}><Text style={styles.heroLink}>Raporu aç</Text><MaterialCommunityIcons name="arrow-top-right" size={17} color="#DDD7FF" /></View></TouchableOpacity>
+        </View>
+
+        <View style={styles.quickActions}>{[
+          { label: 'Ödeme ekle', icon: 'plus' as const, action: () => router.push('/payment/add'), primary: true },
+          { label: 'Abonelik ekle', icon: 'repeat' as const, action: () => router.push({ pathname: '/(tabs)/subscriptions', params: { add: '1' } }), primary: false },
+          { label: 'Borç ekle', icon: 'account-cash-outline' as const, action: () => router.push('/debt/add'), primary: false },
+        ].map(item => <TouchableOpacity accessibilityRole="button" key={item.label} onPress={item.action} style={[styles.quickAction, item.primary && styles.quickPrimary]}><MaterialCommunityIcons name={item.icon} size={23} color={item.primary ? 'white' : '#B9B3FF'} /><Text style={styles.quickText}>{item.label}</Text></TouchableOpacity>)}</View>
+
+        {overdue.length > 0 && <TouchableOpacity accessibilityRole="button" onPress={() => setEventFilter('overdue')} style={styles.overdueBanner}><View style={styles.row}><MaterialCommunityIcons name="alert-circle-outline" size={21} color={Colors.danger} /><Text style={styles.overdueText}>{overdue.length} gecikmiş işlem var</Text></View><MaterialCommunityIcons name="arrow-right" size={20} color={Colors.danger} /></TouchableOpacity>}
+
+        <View style={styles.sectionHeading}><View><Text style={styles.sectionTitle}>Sıradaki işlemler</Text><Text style={styles.caption}>Ödeme, abonelik, borç ve alacakların</Text></View><TouchableOpacity accessibilityRole="button" style={styles.textButton} onPress={() => router.push('/(tabs)/planner')}><Text style={styles.link}>Planı aç</Text><MaterialCommunityIcons name="arrow-top-right" size={17} color={Colors.primaryLight} /></TouchableOpacity></View>
+        <View style={styles.agenda}>
+          <View style={styles.agendaTabs}>{([{ key: 'upcoming', label: 'Önümüzdeki 7 gün', count: upcoming.length }, { key: 'overdue', label: 'Gecikenler', count: overdue.length }] as const).map(tab => <TouchableOpacity key={tab.key} accessibilityRole="button" accessibilityState={{ selected: eventFilter === tab.key }} style={[styles.agendaTab, eventFilter === tab.key && styles.agendaTabActive]} onPress={() => setEventFilter(tab.key)}><Text style={[styles.agendaTabText, eventFilter === tab.key && { color: Colors.textPrimary }]}>{tab.label} <Text style={styles.caption}>({tab.count})</Text></Text></TouchableOpacity>)}</View>
+          <View style={styles.agendaTotal}><Text style={styles.caption}>Planlanan çıkış · {currency}</Text><Text style={styles.agendaAmount}>{formatCurrency(outflow, currency)}</Text></View>
+          {visibleEvents.length ? visibleEvents.slice(0, 5).map(event => <EventRow key={event.id} event={event} onPress={() => openEvent(event)}
+            onPaid={event.kind === 'payment' ? () => void markPaid(event) : undefined} busy={busyPayment === event.entityId} />)
+            : <View style={styles.empty}><View style={styles.emptyIcon}><MaterialCommunityIcons name={eventFilter === 'overdue' ? 'check-all' : 'calendar-blank-outline'} size={29} color={Colors.primaryLight} /></View><Text style={styles.emptyTitle}>{eventFilter === 'overdue' ? 'Gecikmiş işlemin yok' : 'Bu hafta takvimin boş'}</Text><Text style={styles.emptyText}>{eventFilter === 'overdue' ? 'Bu para birimindeki işlemler güncel.' : 'Yeni bir ödeme veya abonelik eklediğinde yaklaşan işlemlerin burada görünür.'}</Text></View>}
+          {visibleEvents.length > 5 && <TouchableOpacity accessibilityRole="button" style={styles.allEvents} onPress={() => setShowNotifications(true)}><Text style={styles.link}>Tüm işlemleri gör ({visibleEvents.length})</Text></TouchableOpacity>}
+        </View>
+
+        <View style={styles.sectionHeading}><Text style={styles.sectionTitle}>Borç & alacak</Text><TouchableOpacity accessibilityRole="button" style={styles.textButton} onPress={() => router.push('/(tabs)/debts')}><Text style={styles.link}>Detaylar</Text><MaterialCommunityIcons name="chevron-right" size={18} color={Colors.primaryLight} /></TouchableOpacity></View>
+        <View style={styles.debtCards}>{[
+          { title: 'Kalan borcum', amount: summary.owe, icon: 'arrow-top-right' as const, color: '#ECAA83' },
+          { title: 'Kalan alacağım', amount: summary.owed, icon: 'arrow-bottom-left' as const, color: '#79D6AC' },
+        ].map(item => <TouchableOpacity accessibilityRole="button" key={item.title} style={styles.debtCard} onPress={() => router.push('/(tabs)/debts')}><View style={styles.rowBetween}><Text style={styles.caption}>{item.title}</Text><MaterialCommunityIcons name={item.icon} size={19} color={item.color} /></View><Text numberOfLines={1} adjustsFontSizeToFit style={[styles.debtAmount, { color: item.color }]}>{formatCurrency(item.amount, currency)}</Text></TouchableOpacity>)}</View>
+
+        <TouchableOpacity accessibilityRole="button" style={styles.subscriptionSummary} onPress={() => router.push('/(tabs)/subscriptions')}><View style={styles.subscriptionIcon}><MaterialCommunityIcons name="repeat" size={24} color="#B9B3FF" /></View><View style={styles.flex}><Text style={styles.eventName}>Aboneliklerin</Text><Text style={styles.caption}>{activeSubscriptions.length} aktif · aylık tahmini</Text><Text style={styles.subscriptionAmount}>{formatCurrency(monthlyEstimate, currency)}</Text></View><MaterialCommunityIcons name="chevron-right" size={22} color={Colors.textSecondary} /></TouchableOpacity>
+        <Text style={styles.footerNote}>Tutarlar {currency} cinsindedir. Para birimleri ayrı hesaplanır.</Text>
+      </>}
+    </ScrollView>
+
+    <Modal visible={showNotifications} transparent animationType="slide" onRequestClose={() => setShowNotifications(false)}>
+      <View style={styles.modalOverlay}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Bildirimleri kapat" onPress={() => setShowNotifications(false)} style={StyleSheet.absoluteFill} />
+        <View style={[styles.notificationPanel, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+          <View style={styles.handle} /><View style={styles.sectionHeading}><View style={styles.flex}><Text style={styles.sectionTitle}>Bildirimler</Text><Text style={styles.caption}>Gecikenler ve 7 gün içindeki işlemler · tüm para birimleri</Text></View><TouchableOpacity accessibilityRole="button" accessibilityLabel="Kapat" style={styles.notificationButton} onPress={() => setShowNotifications(false)}><MaterialCommunityIcons name="close" size={23} color={Colors.textPrimary} /></TouchableOpacity></View>
+          <ScrollView>{events.length ? events.map(event => <EventRow key={event.id} event={event} onPress={() => { setShowNotifications(false); openEvent(event); }} />) : <View style={styles.empty}><MaterialCommunityIcons name="bell-check-outline" size={40} color={Colors.primaryLight} /><Text style={styles.emptyTitle}>Her şey güncel</Text><Text style={styles.emptyText}>Yaklaşan veya gecikmiş bir işlem bulunmuyor.</Text></View>}</ScrollView>
+        </View>
+      </View>
+    </Modal>
+  </View>;
+}
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  scroll: { flex: 1 },
-  scrollContent: { padding: Spacing.lg, paddingBottom: 32 },
-
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: Spacing.lg,
-    paddingTop: Spacing.xl,
-  },
-  greeting: {
-    fontFamily: 'Poppins_700Bold',
-    fontSize: FontSize.xl,
-    color: Colors.textPrimary,
-  },
-  date: {
-    fontFamily: 'Poppins_400Regular',
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  notifBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notifBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    backgroundColor: Colors.danger,
-    borderRadius: 8,
-    minWidth: 16,
-    height: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 3,
-  },
-  notifBadgeText: {
-    fontFamily: 'Poppins_700Bold',
-    fontSize: 9,
-    color: '#fff',
-  },
-
-  overdueBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: Colors.danger,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 10,
-    marginBottom: Spacing.md,
-  },
-  overdueBannerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  overdueBannerText: {
-    fontFamily: 'Poppins_600SemiBold',
-    fontSize: FontSize.sm,
-    color: '#fff',
-  },
-
-  heroCard: {
-    backgroundColor: Colors.primary,
-    borderRadius: BorderRadius.xl,
-    padding: Spacing.xl,
-    marginBottom: Spacing.lg,
-    ...Shadow.primary,
-  },
-  heroTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  heroLabel: {
-    fontFamily: 'Poppins_400Regular',
-    fontSize: FontSize.sm,
-    color: 'rgba(255,255,255,0.75)',
-  },
-  changePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: BorderRadius.full,
-  },
-  changeText: {
-    fontFamily: 'Poppins_600SemiBold',
-    fontSize: FontSize.xs,
-  },
-  heroAmount: {
-    fontFamily: 'Poppins_800ExtraBold',
-    fontSize: 30,
-    color: '#fff',
-    marginBottom: Spacing.md,
-  },
-  completionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.sm,
-    marginBottom: Spacing.md,
-  },
-  completionBarTrack: {
-    flex: 1,
-    height: 5,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    borderRadius: BorderRadius.full,
-    overflow: 'hidden',
-  },
-  completionBarFill: {
-    height: '100%',
-    backgroundColor: '#fff',
-    borderRadius: BorderRadius.full,
-    minWidth: 4,
-  },
-  completionPct: {
-    fontFamily: 'Poppins_500Medium',
-    fontSize: FontSize.xs,
-    color: 'rgba(255,255,255,0.9)',
-    minWidth: 60,
-    textAlign: 'right',
-  },
-  heroStats: {
-    flexDirection: 'row',
-    gap: Spacing.lg,
-  },
-  heroStatItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  heroStatDot: {
-    width: 7,
-    height: 7,
-    borderRadius: BorderRadius.full,
-  },
-  heroStatText: {
-    fontFamily: 'Poppins_400Regular',
-    fontSize: FontSize.xs,
-    color: 'rgba(255,255,255,0.85)',
-  },
-
-  quickRow: {
-    flexDirection: 'row',
-    gap: Spacing.sm,
-    marginBottom: Spacing.lg,
-  },
-  quickBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    paddingVertical: 13,
-    borderRadius: BorderRadius.lg,
-  },
-  quickBtnText: {
-    fontFamily: 'Poppins_600SemiBold',
-    fontSize: FontSize.md,
-    color: '#fff',
-  },
-  plannerBanner: { flexDirection: 'row', alignItems: 'center', gap: Spacing.md, padding: Spacing.md, marginBottom: Spacing.lg, backgroundColor: '#272451', borderRadius: BorderRadius.xl, borderWidth: 1, borderColor: `${Colors.primary}55` },
-  plannerIconWrap: { width: 50, height: 50, borderRadius: BorderRadius.lg, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center', ...Shadow.primary },
-  plannerEyebrow: { fontFamily: 'Poppins_600SemiBold', fontSize: 8, letterSpacing: 1, color: Colors.primaryLight },
-  plannerTitle: { fontFamily: 'Poppins_700Bold', fontSize: FontSize.md, color: Colors.textPrimary, marginTop: 1 },
-  plannerText: { fontFamily: 'Poppins_400Regular', fontSize: 10, color: Colors.textSecondary, marginTop: 1 },
-
-  snapshotCard: {
-    marginBottom: Spacing.lg,
-    paddingBottom: Spacing.md,
-  },
-  snapshotHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.lg,
-  },
-  snapshotRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  snapshotItem: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 5,
-  },
-  snapshotIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: BorderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 2,
-  },
-  snapshotLabel: {
-    fontFamily: 'Poppins_400Regular',
-    fontSize: FontSize.xs,
-    color: Colors.textMuted,
-  },
-  snapshotAmount: {
-    fontFamily: 'Poppins_700Bold',
-    fontSize: FontSize.sm,
-    textAlign: 'center',
-  },
-  snapshotDivider: {
-    width: 1,
-    height: 60,
-    backgroundColor: Colors.surfaceBorder,
-  },
-
-  sectionCard: { marginBottom: Spacing.lg },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: Spacing.md,
-  },
-  sectionTitle: {
-    fontFamily: 'Poppins_600SemiBold',
-    fontSize: FontSize.lg,
-    color: Colors.textPrimary,
-  },
-  seeAll: {
-    fontFamily: 'Poppins_500Medium',
-    fontSize: FontSize.sm,
-    color: Colors.primary,
-  },
-  catRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  catDot: {
-    width: 8,
-    height: 8,
-    borderRadius: BorderRadius.full,
-    marginRight: 6,
-  },
-  catName: {
-    fontFamily: 'Poppins_400Regular',
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-    width: 68,
-  },
-  catPct: {
-    fontFamily: 'Poppins_600SemiBold',
-    fontSize: FontSize.xs,
-    width: 30,
-    textAlign: 'right',
-    marginRight: 6,
-  },
-  catAmt: {
-    fontFamily: 'Poppins_500Medium',
-    fontSize: FontSize.xs,
-    color: Colors.textMuted,
-    width: 68,
-    textAlign: 'right',
-  },
-
-  emptyCard: {
-    alignItems: 'center',
-    paddingVertical: Spacing.xxl,
-    gap: Spacing.sm,
-    marginBottom: Spacing.lg,
-  },
-  emptyTitle: {
-    fontFamily: 'Poppins_600SemiBold',
-    fontSize: FontSize.md,
-    color: Colors.textSecondary,
-  },
-  emptySubtitle: {
-    fontFamily: 'Poppins_400Regular',
-    fontSize: FontSize.sm,
-    color: Colors.textMuted,
-  },
-
-  weekChart: {
-    flexDirection: 'row',
-    height: 100,
-    alignItems: 'flex-end',
-    gap: 6,
-  },
-  weekCol: {
-    flex: 1,
-    height: '100%',
-    alignItems: 'center',
-    gap: 4,
-  },
-  weekBarTrack: {
-    flex: 1,
-    width: '100%',
-    backgroundColor: Colors.surfaceLight,
-    borderRadius: BorderRadius.sm,
-    justifyContent: 'flex-end',
-    overflow: 'hidden',
-  },
-  weekBar: {
-    width: '100%',
-    borderRadius: BorderRadius.sm,
-    minHeight: 4,
-  },
-  weekDay: {
-    fontFamily: 'Poppins_400Regular',
-    fontSize: 10,
-    color: Colors.textMuted,
-  },
-  weekTotal: {
-    fontFamily: 'Poppins_600SemiBold',
-    fontSize: FontSize.sm,
-    color: Colors.textSecondary,
-  },
-
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  notifPanel: {
-    backgroundColor: Colors.surface,
-    borderTopLeftRadius: 30,
-    borderTopRightRadius: 30,
-    padding: 24,
-    paddingBottom: 40,
-    maxHeight: '76%',
-    borderWidth: 1,
-    borderBottomWidth: 0,
-    borderColor: Colors.surfaceBorder,
-  },
-  notifPanelHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  notifPanelTitle: {
-    fontFamily: 'Poppins_700Bold',
-    fontSize: FontSize.xl,
-    color: Colors.textPrimary,
-  },
-  notifPanelSubtitle: {
-    fontFamily: 'Poppins_400Regular',
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
-  notifEmpty: {
-    alignItems: 'center',
-    paddingVertical: 32,
-    gap: 8,
-  },
-  notifEmptyText: {
-    fontFamily: 'Poppins_600SemiBold',
-    fontSize: FontSize.md,
-    color: Colors.textSecondary,
-  },
-  notifEmptySubText: {
-    fontFamily: 'Poppins_400Regular',
-    fontSize: FontSize.sm,
-    color: Colors.textMuted,
-    textAlign: 'center',
-  },
-  notifItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: Colors.surfaceLight,
-    borderRadius: BorderRadius.md,
-    padding: 13,
-    marginBottom: 10,
-    borderLeftWidth: 3,
-  },
-  notifItemIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: BorderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notifItemText: { flex: 1 },
-  notifItemTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm },
-  notifItemType: {
-    flex: 1,
-    fontFamily: 'Poppins_600SemiBold',
-    fontSize: FontSize.xs,
-  },
-  notifItemAmount: {
-    fontFamily: 'Poppins_700Bold',
-    fontSize: FontSize.xs,
-    color: Colors.textPrimary,
-  },
-  notifItemTitle: {
-    fontFamily: 'Poppins_600SemiBold',
-    fontSize: FontSize.md,
-    color: Colors.textPrimary,
-    marginTop: 2,
-  },
-  notifItemBody: {
-    fontFamily: 'Poppins_400Regular',
-    fontSize: FontSize.xs,
-    color: Colors.textSecondary,
-    marginTop: 2,
-  },
+  content: { paddingHorizontal: 20, paddingTop: 20, paddingBottom: 20, width: '100%', maxWidth: 780, alignSelf: 'center' },
+  flex: { flex: 1, minWidth: 0 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 22 },
+  greeting: { fontFamily: 'Poppins_400Regular', fontSize: 12, color: Colors.textSecondary, marginBottom: 3 },
+  pageTitle: { fontFamily: 'Poppins_700Bold', fontSize: 25, letterSpacing: -0.7, color: Colors.textPrimary, marginBottom: 3 },
+  caption: { fontFamily: 'Poppins_400Regular', fontSize: 11, color: Colors.textSecondary },
+  notificationButton: { width: 46, height: 46, borderRadius: 17, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
+  badge: { position: 'absolute', right: -2, top: -2, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center' },
+  badgeText: { fontFamily: 'Poppins_600SemiBold', fontSize: 9, color: 'white' },
+  error: { borderRadius: 14, padding: 14, backgroundColor: `${Colors.danger}15`, marginBottom: 16 },
+  errorText: { color: Colors.danger, fontFamily: 'Poppins_500Medium', fontSize: 12 },
+  loading: { alignItems: 'center', paddingVertical: 80, gap: 16 },
+  hero: { backgroundColor: '#302A55', borderRadius: 26, borderWidth: 1, borderColor: '#514474', padding: 20, overflow: 'hidden' },
+  heroDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#B9A4FF' },
+  eyebrow: { fontFamily: 'Poppins_600SemiBold', fontSize: 10, letterSpacing: 1.5, color: '#C5B5FA' },
+  month: { fontFamily: 'Poppins_500Medium', fontSize: 10, color: '#D1C8E6', textTransform: 'capitalize' },
+  heroAmount: { fontFamily: 'Poppins_700Bold', fontSize: 37, letterSpacing: -1.2, color: '#FFFFFF', marginTop: 18 },
+  heroCaption: { fontFamily: 'Poppins_400Regular', fontSize: 11, color: '#D1C8E6' },
+  heroHint: { fontFamily: 'Poppins_400Regular', fontSize: 10, color: '#B4A8CE', marginTop: 5 },
+  change: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#FFFFFF0F', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3 },
+  changeText: { fontFamily: 'Poppins_500Medium', fontSize: 10, color: '#D6D0FF' },
+  distribution: { height: 5, backgroundColor: '#FFFFFF12', flexDirection: 'row', borderRadius: 5, overflow: 'hidden', marginTop: 22, marginBottom: 16 },
+  heroDetails: { flexDirection: 'row', gap: 10 },
+  dot: { width: 5, height: 5, borderRadius: 3 },
+  heroDetailAmount: { fontFamily: 'Poppins_600SemiBold', fontSize: 13, color: 'white', marginTop: 5 },
+  heroFooter: { borderTopWidth: 1, borderTopColor: '#FFFFFF12', marginTop: 18, paddingTop: 12, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  heroLink: { fontFamily: 'Poppins_500Medium', fontSize: 11, color: '#DDD7FF' },
+  quickActions: { flexDirection: 'row', gap: 10, marginTop: 14, marginBottom: 24 },
+  quickAction: { flex: 1, minHeight: 80, padding: 10, alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 18, backgroundColor: Colors.surface, borderWidth: 1, borderColor: Colors.surfaceBorder },
+  quickPrimary: { backgroundColor: Colors.primary, borderColor: Colors.primary },
+  quickText: { fontFamily: 'Poppins_500Medium', fontSize: 10, textAlign: 'center', color: Colors.textPrimary },
+  overdueBanner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, backgroundColor: '#FF5B5B0D', borderWidth: 1, borderColor: '#FF5B5B30', padding: 14, borderRadius: 16, marginBottom: 20 },
+  overdueText: { color: '#FF9292', fontFamily: 'Poppins_500Medium', fontSize: 12 },
+  sectionHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 12 },
+  sectionTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 17, color: Colors.textPrimary },
+  textButton: { flexDirection: 'row', alignItems: 'center', minHeight: 44, gap: 4 },
+  link: { fontFamily: 'Poppins_500Medium', fontSize: 12, color: Colors.primaryLight },
+  agenda: { backgroundColor: '#242436', borderWidth: 1, borderColor: '#363648', borderRadius: 22, paddingHorizontal: 14, paddingTop: 14, marginBottom: 24 },
+  agendaTabs: { flexDirection: 'row', padding: 3, gap: 4, borderRadius: 12, backgroundColor: Colors.background },
+  agendaTab: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, minHeight: 40, borderRadius: 10 },
+  agendaTabActive: { backgroundColor: Colors.surfaceLight },
+  agendaTabText: { fontFamily: 'Poppins_500Medium', fontSize: 11, color: Colors.textSecondary },
+  agendaTotal: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, paddingVertical: 16 },
+  agendaAmount: { fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: Colors.textPrimary },
+  eventRow: { flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#FFFFFF08', minHeight: 77 },
+  eventLink: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 14 },
+  eventIcon: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  eventName: { fontFamily: 'Poppins_500Medium', fontSize: 13, color: Colors.textPrimary, marginBottom: 3 },
+  eventAmount: { fontFamily: 'Poppins_600SemiBold', fontSize: 12, color: Colors.textPrimary, maxWidth: '40%', textAlign: 'right' },
+  paidButton: { width: 44, height: 48, alignItems: 'center', justifyContent: 'center' },
+  empty: { paddingVertical: 28, paddingHorizontal: 16, alignItems: 'center', gap: 9 },
+  emptyIcon: { width: 54, height: 54, borderRadius: 18, backgroundColor: '#6C63FF14', alignItems: 'center', justifyContent: 'center' },
+  emptyTitle: { fontFamily: 'Poppins_600SemiBold', fontSize: 14, color: Colors.textPrimary },
+  emptyText: { fontFamily: 'Poppins_400Regular', fontSize: 11, lineHeight: 19, color: Colors.textSecondary, textAlign: 'center', maxWidth: 260 },
+  allEvents: { minHeight: 48, alignItems: 'center', justifyContent: 'center', borderTopWidth: 1, borderTopColor: '#FFFFFF08' },
+  debtCards: { flexDirection: 'row', gap: 12, marginBottom: 16 },
+  debtCard: { flex: 1, padding: 16, borderRadius: 18, borderWidth: 1, borderColor: Colors.surfaceBorder, backgroundColor: '#252537' },
+  debtAmount: { fontFamily: 'Poppins_600SemiBold', fontSize: 19, marginTop: 12 },
+  subscriptionSummary: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 16, borderRadius: 18, borderWidth: 1, borderColor: Colors.surfaceBorder, backgroundColor: '#252537' },
+  subscriptionIcon: { width: 48, height: 48, borderRadius: 16, backgroundColor: '#6C63FF18', alignItems: 'center', justifyContent: 'center' },
+  subscriptionAmount: { fontFamily: 'Poppins_600SemiBold', fontSize: 17, color: Colors.textPrimary, marginTop: 5 },
+  footerNote: { fontFamily: 'Poppins_400Regular', fontSize: 10, color: Colors.textSecondary, textAlign: 'center', marginTop: 18 },
+  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: '#00000080' },
+  notificationPanel: { backgroundColor: Colors.background, borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: '85%', paddingHorizontal: 20, paddingTop: 10, borderWidth: 1, borderColor: Colors.surfaceBorder },
+  handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: Colors.surfaceBorder, alignSelf: 'center', marginBottom: 18 },
 });

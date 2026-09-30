@@ -16,7 +16,7 @@ Use Node.js 22.20 or a later 22.x release, along with npm. Fork the repository a
 git clone https://github.com/YOUR_USERNAME/nox-finance-app.git
 cd nox-finance-app
 npm ci
-git switch -c codex/describe-your-change
+git switch -c describe-your-change
 npm start
 ```
 

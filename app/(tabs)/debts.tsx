@@ -6,6 +6,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, router } from 'expo-router';
 import { Colors, Spacing, BorderRadius, FontSize, Shadow } from '../../src/constants/theme';
 import { DebtCard } from '../../src/components/DebtCard';
+import { useTabBarInset } from '../../src/components/TabBarInset';
 import { getDebts } from '../../src/db/database';
 import { formatCurrency } from '../../src/utils/helpers';
 import { Debt } from '../../src/constants/types';
@@ -13,6 +14,7 @@ import { Debt } from '../../src/constants/types';
 const PAGE_SIZE = 5;
 
 export default function DebtsScreen() {
+  const tabBarInset = useTabBarInset();
   const [activeTab, setActiveTab] = useState<'owe' | 'owed'>('owe');
   const [oweDebts, setOweDebts] = useState<Debt[]>([]);
   const [owedDebts, setOwedDebts] = useState<Debt[]>([]);
@@ -123,7 +125,7 @@ export default function DebtsScreen() {
       <FlatList
         data={pagedDebts}
         keyExtractor={(item) => String(item.id)}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, { paddingBottom: tabBarInset + 24 }]}
         renderItem={({ item }) => (
           <DebtCard
             debt={item}

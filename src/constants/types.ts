@@ -8,6 +8,10 @@ export type BackupFrequency = 'daily' | 'weekly' | 'monthly';
 export type BackupDestination = 'device' | 'google-drive' | 'dropbox' | 'onedrive' | 'share';
 
 export type SubscriptionCycle = 'weekly' | 'monthly' | 'yearly';
+export interface SubscriptionCategory {
+  id: number;
+  name: string;
+}
 export interface Subscription {
   id: number;
   name: string;
@@ -21,6 +25,7 @@ export interface Subscription {
   icon_type: IconType;
   icon_value: string;
   color: string;
+  category_id?: number | null;
 }
 export type SubscriptionInput = Omit<Subscription, 'id' | 'created_at'>;
 

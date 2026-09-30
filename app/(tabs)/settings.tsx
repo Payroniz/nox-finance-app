@@ -41,6 +41,7 @@ import {
 } from '../../src/utils/backups';
 import { AppSettings, BackupDestination, BackupFrequency, Currency, UploadedIcon } from '../../src/constants/types';
 import { SelectionSheet } from '../../src/components/SelectionSheet';
+import { useTabBarInset } from '../../src/components/TabBarInset';
 import { clearManagedMedia, persistMediaFile } from '../../src/utils/media';
 
 
@@ -69,6 +70,7 @@ const SettingRow = ({ icon, label, children, onPress }: SettingRowProps) => (
 );
 
 export default function SettingsScreen() {
+  const tabBarInset = useTabBarInset();
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [showNameModal, setShowNameModal] = useState(false);
   const [nameInput, setNameInput] = useState('');
@@ -476,7 +478,7 @@ export default function SettingsScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.content, { paddingBottom: tabBarInset + Spacing.lg }]} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Ayarlar</Text>
         </View>
@@ -701,7 +703,7 @@ export default function SettingsScreen() {
         <Text style={styles.sectionLabel}>HAKKINDA</Text>
         <Card style={styles.settingCard}>
           <SettingRow icon="information" label="NoX Finance">
-            <Text style={styles.settingValue}>v3.1.8</Text>
+            <Text style={styles.settingValue}>v3.2.2</Text>
           </SettingRow>
         </Card>
 

@@ -1,9 +1,16 @@
-import { Currency, Subscription, SubscriptionInput } from '../constants/types';
+import { Currency, Subscription, SubscriptionCycle, SubscriptionInput } from '../constants/types';
 import { formatLocalDateKey, parseLocalDate } from './helpers';
 import { normalizeHexColor } from './colors';
 
 export const SUBSCRIPTION_CYCLES = { weekly: 'Haftalık', monthly: 'Aylık', yearly: 'Yıllık' };
 export const DEFAULT_SUBSCRIPTION_COLOR = '#2A2A3E';
+export type SubscriptionCategoryFilter = 'all' | 'uncategorized' | number;
+export const normalizeSubscriptionCategoryName = (name: string): string => name.trim().replace(/\s+/g, ' ');
+export const subscriptionCategoryKey = (name: string): string => normalizeSubscriptionCategoryName(name).toLocaleLowerCase('tr-TR');
+export const filterSubscriptions = (
+  items: Subscription[], cycle: SubscriptionCycle | 'all', category: SubscriptionCategoryFilter,
+): Subscription[] => items.filter(item => (cycle === 'all' || item.billing_cycle === cycle)
+  && (category === 'all' || (category === 'uncategorized' ? item.category_id == null : item.category_id === category)));
 export const getDefaultSubscriptionIcon = (name: string): string =>
   ['youtube', 'spotify', 'netflix'].find(service => name.toLowerCase().includes(service)) ?? 'repeat';
 
@@ -15,6 +22,7 @@ export const validateSubscription = (item: SubscriptionInput): void => {
     || !['weekly', 'monthly', 'yearly'].includes(item.billing_cycle)
     || !date || formatLocalDateKey(date) !== item.renewal_date
     || ![0, 1].includes(item.active) || typeof item.notes !== 'string'
+    || (item.category_id != null && (!Number.isSafeInteger(item.category_id) || item.category_id <= 0))
     || (item.icon_type !== undefined && !['icon', 'gallery', 'emoji'].includes(item.icon_type))
     || (item.icon_value !== undefined && (typeof item.icon_value !== 'string' || !item.icon_value.trim()))
     || (item.color !== undefined && !normalizeHexColor(item.color))) {

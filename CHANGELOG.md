@@ -32,3 +32,31 @@ This file records user-facing changes to NoX Finance. Source history for earlier
 
 - A color customization feature has been added to subscription cards
 - You can now choose the image for your subscription cards from both your local files and the pre-installed icons.
+
+---
+
+## v3.2.2 - 2026-09-30
+
+### Added
+
+- Combined weekly, monthly, and yearly subscription filters with custom categories, selection counts, and filtered monthly estimates.
+- Category creation from the subscription list and add/edit form, renaming, and deletion that keeps subscriptions under Uncategorized.
+- Persistent subscription category assignments, backward-compatible backup format 7, and regression coverage for category migration, transfers, restore validation, and dashboard calculations.
+- Dashboard shortcuts for adding payments, subscriptions, and debts, plus a chronological seven-day agenda with a separate overdue view.
+
+### Changed
+
+- Rebuilt the home screen around a monthly expense breakdown, upcoming transactions, outstanding debts and receivables, and a compact subscription summary.
+- Restyled all seven bottom navigation destinations as a bordered capsule with outline icons, a rounded active pill in the app's purple palette, and horizontal scrolling on narrow screens.
+- Removed the solid backdrop outside the navigation capsule so page content can scroll behind it, with bottom spacing that keeps the last items accessible.
+- Subscription add/edit now saves the chosen category and shows the saved record in that category; existing subscriptions start as uncategorized.
+- Updated application version metadata and the settings display to v3.2.2, with Android versionCode 6.
+
+### Removed
+
+- Removed duplicate category/weekday charts and the promotional planner banner from the home screen; detailed reports and planning remain available in their tabs.
+
+### Fixed
+
+- Dashboard upcoming items now follow the selected currency, matching the displayed totals.
+- Seven-day subscription summaries now count actual renewals within seven calendar days, including today, without including an eighth day.

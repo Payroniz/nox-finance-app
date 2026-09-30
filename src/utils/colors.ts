@@ -21,7 +21,6 @@ export const hsvToHex = (h: number, s: number, v: number): string => {
   return `#${rgb.map(channel => Math.round((channel + m) * 255).toString(16).padStart(2, '0')).join('').toUpperCase()}`;
 };
 
-// Choose the higher WCAG contrast ratio, including for mid-tone saturated colors.
 export const getContrastColor = (background: string): '#000000' | '#FFFFFF' => {
   const hex = normalizeHexColor(background) ?? '#000000';
   const channels = [1, 3, 5].map(index => {

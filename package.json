@@ -1,6 +1,6 @@
 {
   "name": "nox-finance",
-  "version": "3.1.8",
+  "version": "3.2.2",
   "main": "expo-router/entry",
   "scripts": {
     "lint": "eslint --config .github/eslint.config.mjs .",

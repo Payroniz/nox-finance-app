@@ -1,7 +1,7 @@
 import * as SQLite from 'expo-sqlite';
-import { Payment, Debt, DebtPayment, Category, Settings, AppSettings, Currency, BackupDestination, BackupFrequency, UploadedIcon, Subscription, SubscriptionInput } from '../constants/types';
+import { Payment, Debt, DebtPayment, Category, Settings, AppSettings, Currency, BackupDestination, BackupFrequency, UploadedIcon, Subscription, SubscriptionInput, SubscriptionCategory } from '../constants/types';
 import { formatLocalDateKey, parseLocalDate } from '../utils/helpers';
-import { DEFAULT_SUBSCRIPTION_COLOR, getDefaultSubscriptionIcon, getSubscriptionOccurrences, validateSubscription } from '../utils/subscriptions';
+import { DEFAULT_SUBSCRIPTION_COLOR, getDefaultSubscriptionIcon, getSubscriptionOccurrences, normalizeSubscriptionCategoryName, subscriptionCategoryKey, validateSubscription } from '../utils/subscriptions';
 import { calculateMonthlyStats } from '../utils/expenses';
 import { normalizeHexColor } from '../utils/colors';
 
@@ -39,6 +39,12 @@ export const initializeDatabase = async (): Promise<void> => {
       reminder_days TEXT DEFAULT '[]',
       notification_id TEXT DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS subscription_categories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      name_key TEXT NOT NULL UNIQUE
     );
 
     CREATE TABLE IF NOT EXISTS subscriptions (
@@ -113,6 +119,9 @@ export const initializeDatabase = async (): Promise<void> => {
 
 const migrateSchema = async (database: SQLite.SQLiteDatabase): Promise<void> => {
   const subscriptionColumns = await database.getAllAsync<{ name: string }>('PRAGMA table_info(subscriptions)');
+  if (!subscriptionColumns.some(column => column.name === 'category_id')) {
+    await database.execAsync('ALTER TABLE subscriptions ADD COLUMN category_id INTEGER REFERENCES subscription_categories(id) ON DELETE SET NULL');
+  }
   for (const [name, fallback] of [['icon_type', 'icon'], ['icon_value', 'repeat'], ['color', DEFAULT_SUBSCRIPTION_COLOR]]) {
     if (!subscriptionColumns.some(column => column.name === name)) {
       await database.execAsync(`ALTER TABLE subscriptions ADD COLUMN ${name} TEXT NOT NULL DEFAULT '${fallback}'`);
@@ -244,15 +253,39 @@ export const getPayments = async (): Promise<Payment[]> => {
 export const getSubscriptions = async (): Promise<Subscription[]> =>
   (await getDatabase()).getAllAsync<Subscription>('SELECT * FROM subscriptions ORDER BY active DESC, renewal_date ASC');
 
+export const getSubscriptionCategories = async (): Promise<SubscriptionCategory[]> => {
+  const items = await (await getDatabase()).getAllAsync<SubscriptionCategory>('SELECT id, name FROM subscription_categories');
+  return items.sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+};
+
+export const saveSubscriptionCategory = async (value: string, id?: number): Promise<number> => {
+  const name = normalizeSubscriptionCategoryName(value);
+  if (!name || name.length > 40) throw new Error('INVALID_CATEGORY');
+  const database = await getDatabase();
+  const key = subscriptionCategoryKey(name);
+  const existing = await database.getFirstAsync<SubscriptionCategory>('SELECT id, name FROM subscription_categories WHERE name_key = ?', [key]);
+  if (existing && existing.id !== id) throw new Error('DUPLICATE_CATEGORY');
+  if (id !== undefined) {
+    await database.runAsync('UPDATE subscription_categories SET name = ?, name_key = ? WHERE id = ?', [name, key, id]);
+    return id;
+  }
+  const result = await database.runAsync('INSERT INTO subscription_categories (name, name_key) VALUES (?, ?)', [name, key]);
+  return result.lastInsertRowId;
+};
+
+export const deleteSubscriptionCategory = async (id: number): Promise<void> => {
+  await (await getDatabase()).runAsync('DELETE FROM subscription_categories WHERE id = ?', [id]);
+};
+
 export const saveSubscription = async (item: SubscriptionInput, id?: number): Promise<void> => {
   validateSubscription(item);
   const database = await getDatabase();
   const values = [item.name.trim(), item.amount, item.currency, item.billing_cycle, item.renewal_date, item.active, item.notes.trim(),
-    item.icon_type ?? 'icon', item.icon_value ?? getDefaultSubscriptionIcon(item.name), normalizeHexColor(item.color) ?? DEFAULT_SUBSCRIPTION_COLOR];
+    item.icon_type ?? 'icon', item.icon_value ?? getDefaultSubscriptionIcon(item.name), normalizeHexColor(item.color) ?? DEFAULT_SUBSCRIPTION_COLOR, item.category_id ?? null];
   if (id !== undefined) {
-    await database.runAsync('UPDATE subscriptions SET name = ?, amount = ?, currency = ?, billing_cycle = ?, renewal_date = ?, active = ?, notes = ?, icon_type = ?, icon_value = ?, color = ? WHERE id = ?', [...values, id]);
+    await database.runAsync('UPDATE subscriptions SET name = ?, amount = ?, currency = ?, billing_cycle = ?, renewal_date = ?, active = ?, notes = ?, icon_type = ?, icon_value = ?, color = ?, category_id = ? WHERE id = ?', [...values, id]);
   } else {
-    await database.runAsync('INSERT INTO subscriptions (name, amount, currency, billing_cycle, renewal_date, active, notes, icon_type, icon_value, color) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', values);
+    await database.runAsync('INSERT INTO subscriptions (name, amount, currency, billing_cycle, renewal_date, active, notes, icon_type, icon_value, color, category_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', values);
   }
 };
 
@@ -530,13 +563,14 @@ export const exportData = async () => {
   const categories = await database.getAllAsync<Category>('SELECT * FROM categories');
   const uploadedIcons = await database.getAllAsync<UploadedIcon>('SELECT * FROM uploaded_icons');
   const subscriptions = await getSubscriptions();
+  const subscriptionCategories = await getSubscriptionCategories();
   const settings = await database.getAllAsync<Settings>(
     "SELECT * FROM settings WHERE key NOT IN ('pinCode', 'pinEnabled', 'biometricEnabled', 'notificationPrivacyMigrated', 'automaticBackupEnabled', 'backupDirectoryUri', 'backupDirectoryLabel', 'lastBackupAt', 'lastAutomaticBackupAt')"
   );
 
   return JSON.stringify({
     format: 'nox-finance-backup',
-    version: 6,
+    version: 7,
     exportedAt: new Date().toISOString(),
     payments,
     debts,
@@ -544,6 +578,7 @@ export const exportData = async () => {
     categories,
     uploadedIcons,
     subscriptions,
+    subscriptionCategories,
     settings,
   }, null, 2);
 };
@@ -558,9 +593,22 @@ export const importData = async (raw: string): Promise<void> => {
   const uploadedIcons = Array.isArray(parsed.uploadedIcons) ? parsed.uploadedIcons : [];
   if (parsed.subscriptions !== undefined && !Array.isArray(parsed.subscriptions)) throw new Error('INVALID_BACKUP');
   const subscriptions = (parsed.subscriptions ?? []) as Subscription[];
+  if (parsed.subscriptionCategories !== undefined && !Array.isArray(parsed.subscriptionCategories)) throw new Error('INVALID_BACKUP');
+  const subscriptionCategories = (parsed.subscriptionCategories ?? []) as SubscriptionCategory[];
+  const categoryIds = new Set<number>();
+  const categoryNames = new Set<string>();
+  for (const item of subscriptionCategories) {
+    if (!item || !Number.isSafeInteger(item.id) || item.id <= 0 || typeof item.name !== 'string') throw new Error('INVALID_BACKUP');
+    const name = normalizeSubscriptionCategoryName(item.name);
+    const key = subscriptionCategoryKey(name);
+    if (!name || name.length > 40 || categoryIds.has(item.id) || categoryNames.has(key)) throw new Error('INVALID_BACKUP');
+    categoryIds.add(item.id);
+    categoryNames.add(key);
+  }
   for (const item of subscriptions) {
     if (!item || !Number.isInteger(item.id) || item.id <= 0) throw new Error('INVALID_BACKUP');
     validateSubscription(item);
+    if (item.category_id != null && !categoryIds.has(item.category_id)) throw new Error('INVALID_BACKUP');
   }
 
   if (![payments, debts, debtPayments, categories, settings].every(Array.isArray)) {
@@ -576,6 +624,7 @@ export const importData = async (raw: string): Promise<void> => {
       DELETE FROM categories;
       DELETE FROM uploaded_icons;
       DELETE FROM subscriptions;
+      DELETE FROM subscription_categories;
     `);
 
     for (const item of payments as Payment[]) {
@@ -589,11 +638,15 @@ export const importData = async (raw: string): Promise<void> => {
       );
     }
 
+    for (const item of subscriptionCategories) {
+      await transaction.runAsync('INSERT INTO subscription_categories (id, name, name_key) VALUES (?, ?, ?)',
+        [item.id, normalizeSubscriptionCategoryName(item.name), subscriptionCategoryKey(item.name)]);
+    }
     for (const item of subscriptions) {
       await transaction.runAsync(
-        'INSERT INTO subscriptions (id, name, amount, currency, billing_cycle, renewal_date, active, notes, created_at, icon_type, icon_value, color) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO subscriptions (id, name, amount, currency, billing_cycle, renewal_date, active, notes, created_at, icon_type, icon_value, color, category_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [item.id, item.name.trim(), item.amount, item.currency, item.billing_cycle, item.renewal_date, item.active, item.notes, item.created_at ?? new Date().toISOString(),
-          item.icon_type ?? 'icon', item.icon_value ?? getDefaultSubscriptionIcon(item.name), normalizeHexColor(item.color) ?? DEFAULT_SUBSCRIPTION_COLOR]
+          item.icon_type ?? 'icon', item.icon_value ?? getDefaultSubscriptionIcon(item.name), normalizeHexColor(item.color) ?? DEFAULT_SUBSCRIPTION_COLOR, item.category_id ?? null]
       );
     }
 
@@ -658,9 +711,10 @@ export const deleteAllData = async (): Promise<void> => {
       DELETE FROM categories;
       DELETE FROM uploaded_icons;
       DELETE FROM subscriptions;
+      DELETE FROM subscription_categories;
       DELETE FROM settings;
       DELETE FROM sqlite_sequence
-        WHERE name IN ('payments', 'debts', 'debt_payments', 'categories', 'uploaded_icons', 'subscriptions');
+        WHERE name IN ('payments', 'debts', 'debt_payments', 'categories', 'uploaded_icons', 'subscriptions', 'subscription_categories');
     `);
   });
 

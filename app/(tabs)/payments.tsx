@@ -7,6 +7,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, router } from 'expo-router';
 import { Colors, Spacing, BorderRadius, FontSize, Shadow } from '../../src/constants/theme';
 import { PaymentCard } from '../../src/components/PaymentCard';
+import { useTabBarInset } from '../../src/components/TabBarInset';
 import {
   getPaymentsByDate, getMarkedDates, updatePaymentStatus, deletePayment, getPayments, getSubscriptions,
 } from '../../src/db/database';
@@ -28,6 +29,7 @@ LocaleConfig.defaultLocale = 'tr';
 const PAGE_SIZE = 5;
 
 export default function PaymentsScreen() {
+  const tabBarInset = useTabBarInset();
   const today = getTodayString();
   const [selectedDate, setSelectedDate] = useState(today);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -237,7 +239,7 @@ export default function PaymentsScreen() {
             <View style={{ height: 32 }} />
           </>
         }
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, { paddingBottom: tabBarInset + Spacing.lg }]}
       />
     </View>
   );

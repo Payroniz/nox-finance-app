@@ -8,14 +8,16 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import DateTimePickerModal from 'react-native-modal-datetime-picker';
 import { Colors, BorderRadius, Spacing } from '../../src/constants/theme';
-import { Currency, IconType, Subscription, SubscriptionCycle, UploadedIcon } from '../../src/constants/types';
-import { deleteSubscription, getAllSettings, getSubscriptions, getUploadedIcons, saveSubscription } from '../../src/db/database';
+import { Currency, IconType, Subscription, SubscriptionCategory, SubscriptionCycle, UploadedIcon } from '../../src/constants/types';
+import { deleteSubscription, getAllSettings, getSubscriptions, getSubscriptionCategories, getUploadedIcons, saveSubscription } from '../../src/db/database';
 import { CurrencyInput } from '../../src/components/CurrencyInput';
 import { ColorPicker } from '../../src/components/ColorPicker';
 import { SubscriptionCard, SubscriptionIcon } from '../../src/components/SubscriptionCard';
 import { SubscriptionIconPicker } from '../../src/components/SubscriptionIconPicker';
+import { SubscriptionCategories } from '../../src/components/SubscriptionCategories';
+import { useTabBarInset } from '../../src/components/TabBarInset';
 import { formatCurrency, formatDate, formatLocalDateKey, parseLocalDate } from '../../src/utils/helpers';
-import { getMonthlySubscriptionTotals, getNextRenewal, SUBSCRIPTION_CYCLES } from '../../src/utils/subscriptions';
+import { filterSubscriptions, getMonthlySubscriptionTotals, getNextRenewal, getSubscriptionOccurrences, SUBSCRIPTION_CYCLES, SubscriptionCategoryFilter } from '../../src/utils/subscriptions';
 
 const CURRENCIES: Currency[] = ['TRY', 'USD', 'EUR', 'GBP'];
 const SYMBOLS = { TRY: '₺', USD: '$', EUR: '€', GBP: '£' };
@@ -26,10 +28,17 @@ const SERVICES = [
 ];
 
 export default function SubscriptionsScreen() {
+  const tabBarInset = useTabBarInset();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ edit?: string }>();
+  const params = useLocalSearchParams<{ edit?: string; add?: string }>();
   const openedEdit = useRef<string | undefined>(undefined);
   const [items, setItems] = useState<Subscription[]>([]);
+  const [categories, setCategories] = useState<SubscriptionCategory[]>([]);
+  const [categoryId, setCategoryId] = useState<number | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<SubscriptionCategoryFilter>('all');
+  const [cycleFilter, setCycleFilter] = useState<SubscriptionCycle | 'all'>('all');
+  const [manageCategories, setManageCategories] = useState(false);
+  const [formCategories, setFormCategories] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [defaultCurrency, setDefaultCurrency] = useState<Currency>('TRY');
@@ -56,8 +65,11 @@ export default function SubscriptionsScreen() {
 
   const load = useCallback(async () => {
     try {
-      const [subscriptions, settings, icons] = await Promise.all([getSubscriptions(), getAllSettings(), getUploadedIcons()]);
+      const [subscriptions, settings, icons, groups] = await Promise.all([getSubscriptions(), getAllSettings(), getUploadedIcons(), getSubscriptionCategories()]);
       setItems(subscriptions);
+      setCategories(groups);
+      setCategoryFilter(current => typeof current === 'number' && !groups.some(group => group.id === current) ? 'uncategorized' : current);
+      setCategoryId(current => current !== null && !groups.some(group => group.id === current) ? null : current);
       setUploadedIcons(icons);
       setDefaultCurrency(settings.defaultCurrency);
       setLoadError(false);
@@ -66,19 +78,22 @@ export default function SubscriptionsScreen() {
   }, []);
   useFocusEffect(useCallback(() => { void load(); }, [load]));
   React.useEffect(() => {
+    if (params.add && !loading && !loadError) { openEditor(); router.setParams({ add: undefined }); }
     if (params.edit && params.edit !== openedEdit.current && items.length) {
       const item = items.find(item => String(item.id) === params.edit);
       if (item) { openedEdit.current = params.edit; openEditor(item); router.setParams({ edit: undefined }); }
     }
     if (!params.edit) openedEdit.current = undefined;
-  }, [params.edit, items]);
+  }, [params.edit, params.add, items, loading, loadError]);
 
   const openEditor = (item?: Subscription) => {
     setEditing(item ?? null);
     setName(item?.name ?? '');
     setAmount(item ? String(item.amount) : '');
     setCurrency(item?.currency ?? defaultCurrency);
-    setCycle(item?.billing_cycle ?? 'monthly');
+    setCycle(item?.billing_cycle ?? (cycleFilter === 'all' ? 'monthly' : cycleFilter));
+    setCategoryId(item ? item.category_id ?? null : typeof categoryFilter === 'number' ? categoryFilter : null);
+    setFormCategories(false);
     setRenewal(item ? parseLocalDate(item.renewal_date) ?? new Date() : new Date());
     setRenewalText(item?.renewal_date ?? formatLocalDateKey(new Date()));
     setActive(item ? item.active === 1 : true);
@@ -108,7 +123,9 @@ export default function SubscriptionsScreen() {
     try {
       await saveSubscription({ name: name.trim(), amount: Number(amount), currency, billing_cycle: cycle,
         renewal_date: formatLocalDateKey(renewal), active: active ? 1 : 0, notes: notes.trim(),
-        icon_type: iconType, icon_value: iconValue, color }, editing?.id);
+        icon_type: iconType, icon_value: iconValue, color, category_id: categoryId }, editing?.id);
+      setCategoryFilter(categoryId ?? 'uncategorized');
+      if (cycleFilter !== 'all') setCycleFilter(cycle);
       setVisible(false);
       await load();
     } catch { setSaveError('Abonelik kaydedilemedi. Bilgileri kontrol edip yeniden deneyin.'); }
@@ -126,11 +143,20 @@ export default function SubscriptionsScreen() {
     } },
   ]);
 
-  const totals = getMonthlySubscriptionTotals(items);
-  const nextWeek = new Date(); nextWeek.setDate(nextWeek.getDate() + 7);
-  const weekEnd = formatLocalDateKey(nextWeek);
-  const sorted = [...items].sort((a, b) => b.active - a.active || getNextRenewal(a).localeCompare(getNextRenewal(b)));
-  const upcoming = items.filter(item => item.active === 1 && getNextRenewal(item) <= weekEnd).length;
+  const filtered = filterSubscriptions(items, cycleFilter, categoryFilter);
+  const totals = getMonthlySubscriptionTotals(filtered);
+  const nextWeek = new Date(); nextWeek.setDate(nextWeek.getDate() + 6);
+  const sorted = [...filtered].sort((a, b) => b.active - a.active || getNextRenewal(a).localeCompare(getNextRenewal(b)));
+  const upcoming = getSubscriptionOccurrences(filtered, new Date(), nextWeek).length;
+  const filterName = categoryFilter === 'all' ? 'Tüm abonelikler' : categoryFilter === 'uncategorized' ? 'Kategorisiz' : categories.find(item => item.id === categoryFilter)?.name ?? 'Kategori';
+  const resetFilters = () => { setCategoryFilter('all'); setCycleFilter('all'); };
+  const categoriesChanged = async (id?: number, inForm = false) => {
+    const [groups, subscriptions] = await Promise.all([getSubscriptionCategories(), getSubscriptions()]);
+    setCategories(groups); setItems(subscriptions);
+    setCategoryFilter(current => typeof current === 'number' && !groups.some(group => group.id === current) ? 'uncategorized' : current);
+    setCategoryId(current => current !== null && !groups.some(group => group.id === current) ? null : current);
+    if (id !== undefined) { if (inForm) setCategoryId(id); else setCategoryFilter(id); }
+  };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -140,28 +166,40 @@ export default function SubscriptionsScreen() {
           <MaterialCommunityIcons name="plus" size={26} color="white" />
         </TouchableOpacity>
       </View>
-      <FlatList data={sorted} keyExtractor={item => String(item.id)} contentContainerStyle={styles.list} refreshing={loading} onRefresh={() => { setLoading(true); void load(); }}
+      <FlatList data={sorted} showsVerticalScrollIndicator={false} keyExtractor={item => String(item.id)} contentContainerStyle={[styles.list, { paddingBottom: tabBarInset + Spacing.xxxl }]} refreshing={loading} onRefresh={() => { setLoading(true); void load(); }}
         ListHeaderComponent={<>
+          <View style={styles.frequencyTabs}>{(['all', 'weekly', 'monthly', 'yearly'] as const).map(value => <TouchableOpacity key={value} accessibilityRole="button" accessibilityState={{ selected: cycleFilter === value }} accessibilityLabel={`${value === 'all' ? 'Tümü' : SUBSCRIPTION_CYCLES[value]} abonelikleri göster`}
+            style={[styles.frequencyTab, cycleFilter === value && styles.frequencySelected]} onPress={() => setCycleFilter(value)}>
+            <Text style={[styles.frequencyText, cycleFilter === value && styles.activeText]}>{value === 'all' ? 'Tümü' : SUBSCRIPTION_CYCLES[value]}</Text>
+          </TouchableOpacity>)}</View>
+          <View style={styles.categoryHeading}><Text style={styles.eyebrow}>KATEGORİLER</Text><TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: manageCategories }} style={styles.action} onPress={() => setManageCategories(value => !value)}><MaterialCommunityIcons name={manageCategories ? 'close' : 'tag-plus-outline'} size={18} color={Colors.primaryLight} /><Text style={styles.actionText}>{manageCategories ? 'Kapat' : 'Düzenle / Ekle'}</Text></TouchableOpacity></View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryFilters}>
+            {([{ id: 'all', name: 'Tümü' }, ...categories, { id: 'uncategorized', name: 'Kategorisiz' }] as { id: SubscriptionCategoryFilter; name: string }[]).map(group => <TouchableOpacity key={group.id} accessibilityRole="button" accessibilityState={{ selected: categoryFilter === group.id }} onPress={() => setCategoryFilter(group.id)} style={[styles.filterChip, categoryFilter === group.id && styles.selected]}>
+              <Text style={[styles.chipText, categoryFilter === group.id && styles.activeText]}>{group.name}</Text><Text style={styles.count}>{filterSubscriptions(items, cycleFilter, group.id).length}</Text>
+            </TouchableOpacity>)}
+          </ScrollView>
+          {manageCategories && <SubscriptionCategories categories={categories} onChange={id => categoriesChanged(id)} />}
           <View style={styles.summary}>
             <Text style={styles.eyebrow}>AYLIK TAHMİNİ TOPLAM</Text>
             {Object.entries(totals).length ? Object.entries(totals).map(([unit, total]) => <Text key={unit} style={styles.total}>{formatCurrency(total!, unit as Currency)}</Text>) : <Text style={styles.total}>{formatCurrency(0, defaultCurrency)}</Text>}
-            <Text style={styles.muted}>{items.filter(item => item.active === 1).length} aktif abonelik • 7 gün içinde {upcoming} yenileme</Text>
+            <Text style={styles.muted}>{filtered.filter(item => item.active === 1).length} aktif abonelik • 7 gün içinde {upcoming} yenileme</Text>
             <Text style={styles.hint}>Yıllık ve haftalık ücretler aya bölünür. Para birimleri ayrı hesaplanır.</Text>
           </View>
+          <View style={styles.resultsHeading}><Text style={[styles.cardTitle, styles.flex]}>{filterName} <Text style={styles.muted}>({filtered.length})</Text></Text>{(categoryFilter !== 'all' || cycleFilter !== 'all') && <TouchableOpacity style={styles.action} onPress={resetFilters}><Text style={styles.actionText}>Sıfırla</Text></TouchableOpacity>}</View>
           {loadError && <TouchableOpacity onPress={() => void load()} style={styles.card}><Text style={styles.error}>Abonelikler yüklenemedi. Yeniden denemek için dokunun.</Text></TouchableOpacity>}
         </>}
         ListEmptyComponent={loading ? <ActivityIndicator color={Colors.primary} /> : !loadError ? <View style={styles.empty}>
           <MaterialCommunityIcons name="repeat" size={52} color={Colors.primaryLight} />
-          <Text style={styles.emptyTitle}>İlk aboneliğini ekle</Text>
-          <Text style={styles.emptyText}>YouTube, Spotify, Netflix ve diğer aboneliklerinin tutarını ve yenileme tarihini takip et.</Text>
+          <Text style={styles.emptyTitle}>{items.length ? 'Bu seçimde abonelik yok' : 'İlk aboneliğini ekle'}</Text>
+          <Text style={styles.emptyText}>{items.length ? 'Bu kategoriye bir abonelik ekle veya filtrelerini değiştir.' : 'Aboneliklerini kategorilere ayır, tutarlarını ve yenileme tarihlerini tek yerden takip et.'}</Text>
           <TouchableOpacity style={styles.primaryButton} onPress={() => openEditor()}><Text style={styles.buttonText}>Abonelik Ekle</Text></TouchableOpacity>
         </View> : null}
-        renderItem={({ item }) => <SubscriptionCard item={item} disabled={busy} onEdit={() => openEditor(item)} onDelete={() => remove(item)} />} />
+        renderItem={({ item }) => <SubscriptionCard item={item} categoryName={categories.find(group => group.id === item.category_id)?.name ?? 'Kategorisiz'} disabled={busy} onEdit={() => openEditor(item)} onDelete={() => remove(item)} />} />
 
       <Modal visible={visible} animationType="slide" onRequestClose={closeEditor}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
           <View style={styles.header}><Text style={styles.modalTitle}>{editing ? 'Aboneliği Düzenle' : 'Yeni Abonelik'}</Text><TouchableOpacity accessibilityLabel="Kapat" disabled={busy} onPress={closeEditor} style={styles.action}><MaterialCommunityIcons name="close" size={25} color={Colors.textPrimary} /></TouchableOpacity></View>
-          <ScrollView scrollEnabled={!draggingColor} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.form}>
+          <ScrollView showsVerticalScrollIndicator={false} scrollEnabled={!draggingColor} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.form}>
             {!editing && <View style={styles.chips}>{SERVICES.map(service => <TouchableOpacity key={service.name} onPress={() => { setName(service.name); setIconType('icon'); setIconValue(service.icon); setColor(service.color); }} style={styles.chip}><MaterialCommunityIcons name={service.icon} size={18} color={service.color} /><Text style={styles.chipText}>{service.name}</Text></TouchableOpacity>)}</View>}
             <Text style={styles.label}>Abonelik adı</Text>
             <TextInput accessibilityLabel="Abonelik adı" testID="subscription-name" style={styles.input} placeholder="Örn. YouTube Premium" placeholderTextColor={Colors.textMuted} value={name} onChangeText={setName} maxLength={100} />
@@ -170,6 +208,13 @@ export default function SubscriptionsScreen() {
             <View style={styles.chips}>{CURRENCIES.map(unit => <TouchableOpacity key={unit} accessibilityRole="button" accessibilityState={{ selected: unit === currency }} style={[styles.chip, unit === currency && styles.selected]} onPress={() => setCurrency(unit)}><Text style={styles.chipText}>{SYMBOLS[unit]} {unit}</Text></TouchableOpacity>)}</View>
             <Text style={styles.label}>Ödeme sıklığı</Text>
             <View style={styles.chips}>{(Object.entries(SUBSCRIPTION_CYCLES) as [SubscriptionCycle, string][]).map(([value, label]) => <TouchableOpacity key={value} accessibilityRole="button" accessibilityState={{ selected: value === cycle }} style={[styles.chip, cycle === value && styles.selected]} onPress={() => setCycle(value)}><Text style={styles.chipText}>{label}</Text></TouchableOpacity>)}</View>
+            <Text style={styles.label}>Kategori</Text>
+            <View style={styles.chips}>
+              {[{ id: null, name: 'Kategorisiz' }, ...categories].map(group => <TouchableOpacity key={group.id ?? 'none'} accessibilityRole="button" accessibilityState={{ selected: categoryId === group.id }} style={[styles.chip, categoryId === group.id && styles.selected]} onPress={() => setCategoryId(group.id)}><Text style={styles.chipText}>{group.name}</Text></TouchableOpacity>)}
+              <TouchableOpacity accessibilityRole="button" accessibilityState={{ expanded: formCategories }} style={styles.chip} onPress={() => setFormCategories(value => !value)}><MaterialCommunityIcons name="tag-plus-outline" size={18} color={Colors.primaryLight} /><Text style={styles.actionText}>Kategori oluştur</Text></TouchableOpacity>
+            </View>
+            {formCategories && <SubscriptionCategories categories={categories} onChange={id => categoriesChanged(id, true)} />}
+            <Text style={styles.hint}>Kaydettiğinde aboneliğin seçtiğin kategoride görünür.</Text>
             <Text style={styles.label}>Yenileme tarihi</Text>
             {Platform.OS === 'web' ? <TextInput accessibilityLabel="Yenileme tarihi (YYYY-AA-GG)" style={styles.input} value={renewalText} placeholder="YYYY-AA-GG" maxLength={10}
               onChangeText={text => { setRenewalText(text); const date = parseLocalDate(text); if (date && formatLocalDateKey(date) === text) setRenewal(date); }} />
@@ -188,7 +233,7 @@ export default function SubscriptionsScreen() {
             <Text style={styles.label}>Kart rengi</Text>
             <ColorPicker value={color} onChange={setColor} onInteractionChange={setDraggingColor} />
             <Text style={styles.label}>Kart önizlemesi</Text>
-            <SubscriptionCard preview item={{ name, amount: Number(amount) || 0, currency, billing_cycle: cycle, renewal_date: formatLocalDateKey(renewal), active: active ? 1 : 0,
+            <SubscriptionCard preview categoryName={categories.find(group => group.id === categoryId)?.name ?? 'Kategorisiz'} item={{ name, amount: Number(amount) || 0, currency, billing_cycle: cycle, renewal_date: formatLocalDateKey(renewal), active: active ? 1 : 0,
               notes, icon_type: iconType, icon_value: iconValue, color }} />
             {!!saveError && <Text accessibilityRole="alert" style={styles.error}>{saveError}</Text>}
             <TouchableOpacity accessibilityRole="button" testID="save-subscription" disabled={busy} style={[styles.primaryButton, busy && styles.inactive]} onPress={() => void save()}>{busy ? <ActivityIndicator color="white" /> : <Text style={styles.buttonText}>{editing ? 'Değişiklikleri Kaydet' : 'Aboneliği Ekle'}</Text>}</TouchableOpacity>
@@ -201,6 +246,16 @@ export default function SubscriptionsScreen() {
 }
 
 const styles = StyleSheet.create({
+  frequencyTabs: { flexDirection: 'row', backgroundColor: Colors.surface, borderRadius: 16, padding: 4, gap: 4 },
+  frequencyTab: { flex: 1, minHeight: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  frequencySelected: { backgroundColor: Colors.primary },
+  frequencyText: { color: Colors.textSecondary, fontFamily: 'Poppins_500Medium', fontSize: 12 },
+  activeText: { color: Colors.textPrimary },
+  categoryHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 },
+  categoryFilters: { gap: 8, paddingBottom: 18 },
+  filterChip: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, minHeight: 44, borderRadius: 24, borderWidth: 1, borderColor: Colors.surfaceBorder, backgroundColor: Colors.surface },
+  count: { color: Colors.textSecondary, fontFamily: 'Poppins_500Medium', fontSize: 11 },
+  resultsHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, marginBottom: 8 },
   container: { flex: 1, backgroundColor: Colors.background },
   header: { padding: Spacing.xl, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   title: { color: Colors.textPrimary, fontFamily: 'Poppins_700Bold', fontSize: 26 },
