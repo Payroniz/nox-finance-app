@@ -96,7 +96,8 @@
       ],
       "expo-local-authentication",
       "expo-secure-store",
-      "expo-sqlite"
+      "expo-sqlite",
+      "expo-sharing"
     ],
     "scheme": "nox",
     "experiments": {
