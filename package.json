@@ -6,6 +6,7 @@
     "lint": "eslint --config .github/eslint.config.mjs .",
     "typecheck": "tsc --noEmit",
     "check:dependencies": "expo install --check",
+    "test": "node --test scripts/verify-salary.cjs",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",

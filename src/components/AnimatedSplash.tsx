@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, Image, Platform, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Defs, Line, RadialGradient, Rect, Stop } from 'react-native-svg';
+import logo from '../../assets/splash.png';
 
-const logo = require('../../assets/splash.png');
 const useNativeDriver = Platform.OS !== 'web';
 
 export function AnimatedSplash({ ready, onFinish, onLayout }: { ready: boolean; onFinish: () => void; onLayout: () => void }) {
