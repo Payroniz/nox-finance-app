@@ -33,39 +33,13 @@ NoX Finance is an Expo application for tracking one-time or recurring payments, 
 - Due dates, interest rates, and multiple reminders for debts
 - Monthly spending summaries, weekly trends, and category breakdowns
 - Support for TRY, USD, EUR, and GBP
+- Monthly salary planning with hourly or fixed net pay, daily hours/minutes and unpaid breaks, and allocations to payments, debts, subscription renewals, or manual expenses
 - Multiple local reminder times for payments, debts, and receivables
 - Detailed in-app notification center with deep links to each record
 - PIN protection, biometric authentication, and automatic locking
 - Automatic rotating local backups, JSON export, folder restore, and cloud-provider sharing
 - Secure in-app deletion of all application data
 
-## Version 3.2.2
-
-Subscriptions can be filtered by billing frequency and custom category together. Create categories in the list or while adding/editing a subscription; saving moves the record into the selected category. Deleting a category keeps its subscriptions under **Kategorisiz**. Filtered counts and monthly estimates reflect the current selection. Backup format 7 preserves categories and assignments; older backups restore subscriptions as uncategorized.
-
-The redesigned dashboard prioritizes the monthly expense breakdown, payment/subscription/debt shortcuts, and a chronological seven-day agenda with a separate overdue view. Its totals and agenda follow the selected currency, while the notification panel includes all currencies. The bottom navigation uses an outlined capsule, outline icons, and the app's purple palette for the active tab; smaller screens scroll horizontally to keep all seven destinations readable.
-
-The **Abonelikler** tab tracks subscriptions such as YouTube, Spotify, and Netflix. Choose a weekly, monthly, or yearly cycle, amount, currency, and billing date. Upcoming renewal dates preserve the original billing day across short months and leap years. Paused subscriptions are excluded from totals. These records are included in JSON backups; they do not charge or cancel services or automatically create paid transactions.
-
-Active subscriptions contribute their full renewal amounts to the dashboard, monthly statistics, category/day charts, payment calendar, and 7/30/90-day planner from the saved billing date onward, without requiring a separate payment record. The subscriptions summary and the planner's monthly recurring estimate amortize weekly/yearly fees; period totals use actual renewal dates. Currency selectors keep TRY, USD, EUR, and GBP totals separate. Subscription renewals have no paid/unpaid status and do not affect payment completion scores. A separately entered payment remains a separate expense, so do not enter the same subscription charge twice.
-
-When adding or editing a subscription, choose any bundled system icon, reuse the shared uploaded-icon library, or upload an image (up to 5 MB). Set the card background with the draggable color palette/hue strip or a HEX code. The live preview and saved cards automatically choose black or white text for contrast. Backup format 7 also preserves these appearance fields and includes subscription images; older backups remain importable.
-
-Automatic backups keep the five newest copies in NoX's private application directory, without requiring an external folder permission. These copies are removed when the app is uninstalled. Use **Şimdi Yedekle** to save an additional copy to a selected folder or another app. **Yedekleme Aracı** remains available even when automatic backup is off, so an expired folder permission can be renewed. Existing external backups can still be restored with the file picker.
-
-The splash logo and wordmark are larger. Native splash changes require a new Android/iOS build; Metro refresh or an over-the-air JavaScript update cannot replace them. Preview and production EAS builds increment the remote build number automatically.
-
-Development checks (Node.js 22.20+):
-
-```bash
-npm ci
-npm run lint
-npm run typecheck
-npm test
-npx expo export --platform android
-```
-
-Regression tests exercise billing dates, currency totals, real SQLite CRUD and restore transactions, and backup I/O through simulated native file adapters. Final checks on an Android device should cover the startup splash, folder selection/cancellation, a cloud-provider export, sharing, and restoring a backup with subscriptions and icons.
 
 ## Screenshots
 
@@ -208,26 +182,6 @@ Expo SQLite uses WASM and `SharedArrayBuffer` on the web. The required Metro con
 ```text
 Cross-Origin-Embedder-Policy: credentialless
 Cross-Origin-Opener-Policy: same-origin
-```
-
-## Project structure
-
-```text
-.
-├── app/                    # Expo Router screens and routes
-│   ├── (tabs)/             # Main tab screens
-│   ├── debt/               # Debt creation and detail screens
-│   └── payment/            # Payment creation and detail screens
-├── assets/                 # App icons and splash assets
-├── docs/screenshots/       # Screenshots used in this README
-├── src/
-│   ├── components/         # Reusable UI components
-│   ├── constants/          # Theme values and TypeScript types
-│   ├── db/                 # SQLite schema and data operations
-│   └── utils/              # Notifications, security, and helpers
-├── app.json                # Expo application configuration
-├── eas.json                # EAS Build profiles
-└── metro.config.js         # Metro and SQLite WASM configuration
 ```
 
 ## Validation

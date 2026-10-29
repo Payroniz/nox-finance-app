@@ -81,7 +81,6 @@ const createPortableBackup = async (): Promise<string> => {
   }
   parsed.mediaAssets = mediaAssets;
   parsed.mediaIncluded = mediaAssets.length;
-  parsed.version = 7;
   return JSON.stringify(parsed, null, 2);
 };
 

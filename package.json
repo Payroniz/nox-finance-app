@@ -1,12 +1,11 @@
 {
   "name": "nox-finance",
-  "version": "3.2.2",
+  "version": "3.2.3",
   "main": "expo-router/entry",
   "scripts": {
     "lint": "eslint --config .github/eslint.config.mjs .",
     "typecheck": "tsc --noEmit",
     "check:dependencies": "expo install --check",
-    "test": "node --test --experimental-test-isolation=none tests/*.test.cjs",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",

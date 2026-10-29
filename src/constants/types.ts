@@ -29,6 +29,43 @@ export interface Subscription {
 }
 export type SubscriptionInput = Omit<Subscription, 'id' | 'created_at'>;
 
+export interface SalaryPeriod {
+  id: number;
+  month: string;
+  currency: Currency;
+  mode: 'hourly' | 'monthly';
+  hourly_rate_minor: number;
+  monthly_salary_minor: number;
+}
+
+export interface SalaryWorkEntry {
+  id: number;
+  period_id: number;
+  date: string;
+  worked_minutes: number;
+  break_minutes: number;
+  hourly_rate_minor: number;
+  notes: string;
+}
+
+export type SalaryAllocationKind = 'payment' | 'debt' | 'subscription' | 'manual';
+export interface SalaryAllocation {
+  id: number;
+  period_id: number;
+  kind: SalaryAllocationKind;
+  source_id: number | null;
+  occurrence_date: string;
+  title: string;
+  amount_minor: number;
+  notes: string;
+}
+
+export interface SalaryData {
+  periods: SalaryPeriod[];
+  workEntries: SalaryWorkEntry[];
+  allocations: SalaryAllocation[];
+}
+
 export interface UploadedIcon {
   id: number;
   uri: string;

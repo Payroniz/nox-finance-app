@@ -21,11 +21,14 @@ import { migrateNotificationSchedulesIfNeeded, removeLegacySensitiveNotification
 import { migrateLegacyPin, verifyPin } from '../src/utils/security';
 import { cleanupTemporaryBackups, runAutomaticBackupIfDue } from '../src/utils/backups';
 import { Colors, Spacing, BorderRadius, FontSize } from '../src/constants/theme';
+import { AnimatedSplash } from '../src/components/AnimatedSplash';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const [appIsReady, setAppIsReady] = useState(false);
+  const [introComplete, setIntroComplete] = useState(false);
+  const finishIntro = useCallback(() => setIntroComplete(true), []);
   const [initializationError, setInitializationError] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
   const [lockMethod, setLockMethod] = useState<'pin' | 'biometric' | null>(null);
@@ -91,7 +94,7 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    if (!appIsReady || Platform.OS === 'web') return;
+    if (!appIsReady || !introComplete || Platform.OS === 'web') return;
 
     const openNotificationTarget = (response: Notifications.NotificationResponse) => {
       const data = response.notification.request.content.data as Record<string, unknown>;
@@ -109,7 +112,7 @@ export default function RootLayout() {
       }
     });
     return () => subscription.remove();
-  }, [appIsReady]);
+  }, [appIsReady, introComplete]);
 
   useEffect(() => {
     const handleAppStateChange = async (nextState: AppStateStatus) => {
@@ -156,10 +159,10 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    if (isLocked && lockMethod === 'biometric') {
+    if (introComplete && isLocked && lockMethod === 'biometric') {
       handleBiometricAuth();
     }
-  }, [isLocked, lockMethod]);
+  }, [introComplete, isLocked, lockMethod]);
 
   const handleBiometricAuth = async () => {
     try {
@@ -224,12 +227,10 @@ export default function RootLayout() {
   };
 
   const onLayoutRootView = useCallback(async () => {
-    if (appIsReady) {
-      await SplashScreen.hideAsync();
-    }
-  }, [appIsReady]);
+    await SplashScreen.hideAsync().catch(() => undefined);
+  }, []);
 
-  if (!appIsReady) return null;
+  if (!appIsReady || !introComplete) return <AnimatedSplash ready={appIsReady} onFinish={finishIntro} onLayout={onLayoutRootView} />;
 
   if (initializationError) {
     return (

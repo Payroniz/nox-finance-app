@@ -4,6 +4,7 @@ import {
   Switch, Alert, StatusBar, Image, TextInput, Modal, KeyboardAvoidingView, Platform, Linking
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import { useFocusEffect } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as LocalAuthentication from 'expo-local-authentication';
@@ -703,7 +704,7 @@ export default function SettingsScreen() {
         <Text style={styles.sectionLabel}>HAKKINDA</Text>
         <Card style={styles.settingCard}>
           <SettingRow icon="information" label="NoX Finance">
-            <Text style={styles.settingValue}>v3.2.2</Text>
+            <Text style={styles.settingValue}>v{Constants.expoConfig?.version ?? '3.2.3'}</Text>
           </SettingRow>
         </Card>
 

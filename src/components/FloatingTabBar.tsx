@@ -8,7 +8,7 @@ import { useMeasureTabBar } from './TabBarInset';
 type BottomTabBarProps = Parameters<NonNullable<React.ComponentProps<typeof Tabs>['tabBar']>>[0];
 const ICONS: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
   index: 'home-outline', payments: 'calendar-check-outline', subscriptions: 'repeat', debts: 'account-cash-outline',
-  stats: 'chart-box-outline', planner: 'calendar-clock-outline', settings: 'cog-outline',
+  stats: 'chart-box-outline', planner: 'calendar-clock-outline', salary: 'wallet-outline', settings: 'cog-outline',
 };
 
 export function FloatingTabBar({ state, descriptors, navigation, insets }: BottomTabBarProps) {

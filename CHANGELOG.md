@@ -2,7 +2,25 @@
 
 This file records user-facing changes to NoX Finance. Source history for earlier releases is available through the [GitHub tags](https://github.com/Payroniz/nox-finance-app/tags).
 
-## v3.1.8 - 2026-09-21
+---
+
+## [v3.1.7] - 2026-09-21
+
+### Added
+
+- "Upload Icons" and "Uploaded Icons" are back in the settings.
+- Uploaded icons can be selected from the payment and debt adding/editing screens.
+- Profile photos and icons are now included in the JSON backup as Base64.
+- "Restore Backup" allows direct selection of the JSON file.
+- Automatic backups can be restored by selecting from a dated list.
+- Frequency, tool, and automatic backup history are hidden when automatic backup is off.
+- When Drive, Dropbox, and OneDrive are selected, Android's account/folder provider opens; the selected folder becomes the automatic backup target. The relevant application must be installed on the phone and logged into the account.
+- The home page, payments, debts, and statistics have been improved.
+- A new "Plan" tab has been added, offering 7/30/90-day cash flow.
+
+---
+
+## [v3.1.8] - 2026-09-21
 
 ### Added
 
@@ -26,7 +44,7 @@ This file records user-facing changes to NoX Finance. Source history for earlier
 
 ---
 
-## v3.1.9 - 2026-09-21
+## [v3.1.9] - 2026-09-21
 
 ### Added
 
@@ -35,7 +53,7 @@ This file records user-facing changes to NoX Finance. Source history for earlier
 
 ---
 
-## v3.2.2 - 2026-09-30
+## [v3.2.2] - 2026-09-30
 
 ### Added
 
@@ -60,3 +78,41 @@ This file records user-facing changes to NoX Finance. Source history for earlier
 
 - Dashboard upcoming items now follow the selected currency, matching the displayed totals.
 - Seven-day subscription summaries now count actual renewals within seven calendar days, including today, without including an eighth day.
+
+---
+
+## [v3.2.3] - 2026-10-29
+
+### Added
+- **Maaş** beside **Plan**, with separate months/currencies, hourly or fixed monthly net pay, and a remaining-income summary.
+- Daily hours, minutes, unpaid breaks, individual rates, notes, editing, and deletion. Historical daily rates remain unchanged when the monthly default changes.
+- Salary allocations to unpaid payments, partial debt amounts, individual subscription renewals, or manual budget items; editing, removal, source links, and negative-budget warnings.
+- Integer minor-unit arithmetic, per-day rounding, duplicate-day/source protection, strict input validation, calendar boundaries, SQLite persistence, and restore failures.
+- Expense-period selection independent of the salary month: salary month, next month, month navigation, or a custom inclusive range of up to 366 days, with an optional overdue-payment/debt filter.
+- Future payment, debt, and subscription-renewal allocations from the current salary, grouped by expense month, with future-month totals and optional dates for manual expenses.
+- Animated launch experience with orbiting rings, a subtle breathing glow, and a smooth exit after initialization. Respects reduced-motion preferences and preserves startup security checks.
+- Backup format 9 for salary records and dated allocations, backward-compatible restores, and salary cleanup during deletion of all app data.
+
+### Changed
+- Redesigned the salary dashboard and all salary setup, work, allocation, editing, and removal forms with dark layered cards, purple/teal accents, a budget ring, numbered sections, live calculations, and persistent save/cancel actions.
+- Settings now reads the version from app metadata.
+- Matched the native splash background to the animated launch screen.
+
+### Fixed
+- Future expenses are validated against their own due/renewal dates when saving, instead of being restricted to the salary month.
+- Duplicate payment and debt detection remains valid after their due dates change. Each subscription renewal is protected independently across salary months.
+- Manual expense dates are retained when editing and restoring backups. Linked allocations retain their original date and amount snapshots.
+- Budget percentages remain accurate above 100%; a zero-income budget does not display a misleading percentage.
+
+### Behavior
+- Allocations reserve a budget amount; they do not perform payments or modify paid statuses, debt balances, or expense statistics.
+- Saved allocations retain their amounts after changes to their original sources. Each subscription renewal is a distinct expense; currencies are never combined.
+- Net rates are entered by the user; taxes, insurance deductions, and overtime coefficients are not inferred.
+
+---
+
+[v3.1.7]: https://github.com/Payroniz/nox-finance-app/releases/tag/V3.1.7
+[v3.1.8]: https://github.com/Payroniz/nox-finance-app/releases/tag/V3.1.8
+[v3.1.9]: https://github.com/Payroniz/nox-finance-app/releases/tag/V3.1.9
+[v3.2.2]: https://github.com/Payroniz/nox-finance-app/releases/tag/V3.2.2
+[v3.2.3]: https://github.com/Payroniz/nox-finance-app/releases/tag/V3.2.3

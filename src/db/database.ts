@@ -1,9 +1,10 @@
 import * as SQLite from 'expo-sqlite';
-import { Payment, Debt, DebtPayment, Category, Settings, AppSettings, Currency, BackupDestination, BackupFrequency, UploadedIcon, Subscription, SubscriptionInput, SubscriptionCategory } from '../constants/types';
+import { Payment, Debt, DebtPayment, Category, Settings, AppSettings, Currency, BackupDestination, BackupFrequency, UploadedIcon, Subscription, SubscriptionInput, SubscriptionCategory, SalaryPeriod, SalaryWorkEntry, SalaryAllocation, SalaryData } from '../constants/types';
 import { formatLocalDateKey, parseLocalDate } from '../utils/helpers';
 import { DEFAULT_SUBSCRIPTION_COLOR, getDefaultSubscriptionIcon, getSubscriptionOccurrences, normalizeSubscriptionCategoryName, subscriptionCategoryKey, validateSubscription } from '../utils/subscriptions';
 import { calculateMonthlyStats } from '../utils/expenses';
 import { normalizeHexColor } from '../utils/colors';
+import { salaryAllocationSource, validateSalaryAllocation, validateSalaryBackup, validateSalaryPeriod, validateSalaryWorkEntry, salarySourceKey } from '../utils/salary';
 
 const DATABASE_NAME = 'nox.db';
 
@@ -105,6 +106,42 @@ export const initializeDatabase = async (): Promise<void> => {
       name TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS salary_periods (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      month TEXT NOT NULL,
+      currency TEXT NOT NULL CHECK (currency IN ('TRY', 'USD', 'EUR', 'GBP')),
+      mode TEXT NOT NULL CHECK (mode IN ('hourly', 'monthly')),
+      hourly_rate_minor INTEGER NOT NULL CHECK (hourly_rate_minor BETWEEN 0 AND 99999999999),
+      monthly_salary_minor INTEGER NOT NULL CHECK (monthly_salary_minor BETWEEN 0 AND 99999999999),
+      UNIQUE (month, currency)
+    );
+    CREATE TABLE IF NOT EXISTS salary_work_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      period_id INTEGER NOT NULL REFERENCES salary_periods(id) ON DELETE CASCADE,
+      date TEXT NOT NULL,
+      worked_minutes INTEGER NOT NULL CHECK (worked_minutes BETWEEN 1 AND 1440),
+      break_minutes INTEGER NOT NULL CHECK (break_minutes >= 0 AND break_minutes < worked_minutes),
+      hourly_rate_minor INTEGER NOT NULL CHECK (hourly_rate_minor BETWEEN 1 AND 99999999999),
+      notes TEXT NOT NULL DEFAULT '',
+      UNIQUE (period_id, date)
+    );
+    CREATE TABLE IF NOT EXISTS salary_allocations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      period_id INTEGER NOT NULL REFERENCES salary_periods(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK (kind IN ('payment', 'debt', 'subscription', 'manual')),
+      source_id INTEGER,
+      occurrence_date TEXT NOT NULL DEFAULT '',
+      title TEXT NOT NULL,
+      amount_minor INTEGER NOT NULL CHECK (amount_minor BETWEEN 1 AND 99999999999),
+      notes TEXT NOT NULL DEFAULT '',
+      CHECK ((kind = 'manual' AND source_id IS NULL) OR (kind != 'manual' AND source_id > 0))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS salary_unique_bill ON salary_allocations(kind, source_id, occurrence_date)
+      WHERE kind IN ('payment', 'subscription');
+    CREATE UNIQUE INDEX IF NOT EXISTS salary_unique_payment ON salary_allocations(source_id) WHERE kind = 'payment';
+    CREATE UNIQUE INDEX IF NOT EXISTS salary_unique_debt ON salary_allocations(period_id, source_id) WHERE kind = 'debt';
+    CREATE INDEX IF NOT EXISTS salary_allocations_period ON salary_allocations(period_id);
   `);
 
   await migrateSchema(database);
@@ -555,6 +592,85 @@ export const getMonthlyStats = async (year: number, month: number, currency?: Cu
   return calculateMonthlyStats(payments, subscriptions, categories, year, month, unit);
 };
 
+export const getSalaryData = async (): Promise<SalaryData> => {
+  const database = await getDatabase();
+  const [periods, workEntries, allocations] = await Promise.all([
+    database.getAllAsync<SalaryPeriod>('SELECT * FROM salary_periods ORDER BY month DESC'),
+    database.getAllAsync<SalaryWorkEntry>('SELECT * FROM salary_work_entries ORDER BY date DESC'),
+    database.getAllAsync<SalaryAllocation>('SELECT * FROM salary_allocations ORDER BY id DESC'),
+  ]);
+  return { periods, workEntries, allocations };
+};
+
+export const saveSalaryPeriod = async (item: Omit<SalaryPeriod, 'id'>, id?: number): Promise<void> => {
+  validateSalaryPeriod(item);
+  const database = await getDatabase();
+  if (id !== undefined) {
+    const result = await database.runAsync(
+      'UPDATE salary_periods SET mode = ?, hourly_rate_minor = ?, monthly_salary_minor = ? WHERE id = ? AND month = ? AND currency = ?',
+      [item.mode, item.hourly_rate_minor, item.monthly_salary_minor, id, item.month, item.currency]);
+    if (!result.changes) throw new Error('Maaş dönemi bulunamadı. Ekranı yenileyin.');
+  } else {
+    const existing = await database.getFirstAsync('SELECT id FROM salary_periods WHERE month = ? AND currency = ?', [item.month, item.currency]);
+    if (existing) throw new Error('Bu ay ve para birimi için maaş zaten tanımlı. Ekranı yenileyin.');
+    await database.runAsync('INSERT INTO salary_periods (month, currency, mode, hourly_rate_minor, monthly_salary_minor) VALUES (?, ?, ?, ?, ?)',
+      [item.month, item.currency, item.mode, item.hourly_rate_minor, item.monthly_salary_minor]);
+  }
+};
+
+export const saveSalaryWorkEntry = async (item: Omit<SalaryWorkEntry, 'id'>, id?: number): Promise<void> => {
+  const database = await getDatabase();
+  const period = await database.getFirstAsync<SalaryPeriod>('SELECT * FROM salary_periods WHERE id = ?', [item.period_id]);
+  if (!period || period.mode !== 'hourly') throw new Error('Çalışma eklemek için saatlik maaş tanımlayın.');
+  validateSalaryWorkEntry(item, period, formatLocalDateKey(new Date()));
+  const existing = await database.getFirstAsync<{ id: number }>('SELECT id FROM salary_work_entries WHERE period_id = ? AND date = ?', [item.period_id, item.date]);
+  if (existing && existing.id !== id) throw new Error('Bu gün zaten kayıtlı. Mevcut günü düzenleyin.');
+  const values = [item.date, item.worked_minutes, item.break_minutes, item.hourly_rate_minor, item.notes.trim()];
+  if (id !== undefined) {
+    const result = await database.runAsync('UPDATE salary_work_entries SET date = ?, worked_minutes = ?, break_minutes = ?, hourly_rate_minor = ?, notes = ? WHERE id = ? AND period_id = ?', [...values, id, item.period_id]);
+    if (!result.changes) throw new Error('Çalışma kaydı bulunamadı. Ekranı yenileyin.');
+  } else {
+    await database.runAsync('INSERT INTO salary_work_entries (date, worked_minutes, break_minutes, hourly_rate_minor, notes, period_id) VALUES (?, ?, ?, ?, ?, ?)', [...values, item.period_id]);
+  }
+};
+
+export const saveSalaryAllocation = async (item: Omit<SalaryAllocation, 'id'>, id?: number): Promise<void> => {
+  const database = await getDatabase();
+  const period = await database.getFirstAsync<SalaryPeriod>('SELECT * FROM salary_periods WHERE id = ?', [item.period_id]);
+  if (!period) throw new Error('Önce maaş dönemini tanımlayın.');
+  validateSalaryAllocation(item, period);
+  const existing = id === undefined ? null : await database.getFirstAsync<SalaryAllocation>('SELECT * FROM salary_allocations WHERE id = ? AND period_id = ?', [id, item.period_id]);
+  if (id !== undefined && !existing) throw new Error('Gider kaydı bulunamadı. Ekranı yenileyin.');
+  if (existing && salarySourceKey(existing) !== salarySourceKey(item)) throw new Error('Bağlı gider değiştirilemez. Kaydı kaldırıp yeniden ekleyin.');
+  if (item.kind !== 'manual') {
+    const duplicate = await database.getFirstAsync<{ id: number }>(
+      "SELECT id FROM salary_allocations WHERE kind = ? AND source_id = ? AND (? != 'subscription' OR occurrence_date = ?) AND (? != 'debt' OR period_id = ?)",
+      [item.kind, item.source_id, item.kind, item.occurrence_date, item.kind, item.period_id]);
+    if (duplicate && duplicate.id !== id) throw new Error('Bu gider zaten maaşa bağlandı. Mevcut ayırmayı düzenleyin.');
+    if (!existing || item.amount_minor > existing.amount_minor) {
+      const [payments, debts, subscriptions] = await Promise.all([getPayments(), getDebts(), getSubscriptions()]);
+      const source = salaryAllocationSource(period, item, payments, debts, subscriptions);
+      if (!source) throw new Error('Bu gider artık eklenebilir durumda değil. Listeyi yenileyin.');
+      if (!existing && item.occurrence_date !== source.occurrence_date) throw new Error('Giderin vadesi değişmiş. Listeyi yenileyip yeniden seçin.');
+      if (item.amount_minor > source.amount_minor) throw new Error('Ayrılan tutar gider tutarını veya kalan borcu aşamaz.');
+    }
+  }
+  if (existing) {
+    await database.runAsync('UPDATE salary_allocations SET title = ?, amount_minor = ?, notes = ?, occurrence_date = ? WHERE id = ? AND period_id = ?',
+      [item.title.trim(), item.amount_minor, item.notes.trim(), item.kind === 'manual' ? item.occurrence_date : existing.occurrence_date, id!, item.period_id]);
+  } else {
+    await database.runAsync('INSERT INTO salary_allocations (period_id, kind, source_id, occurrence_date, title, amount_minor, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [item.period_id, item.kind, item.source_id, item.occurrence_date, item.title.trim(), item.amount_minor, item.notes.trim()]);
+  }
+};
+
+export const deleteSalaryWorkEntry = async (id: number, periodId: number): Promise<void> => {
+  await (await getDatabase()).runAsync('DELETE FROM salary_work_entries WHERE id = ? AND period_id = ?', [id, periodId]);
+};
+export const deleteSalaryAllocation = async (id: number, periodId: number): Promise<void> => {
+  await (await getDatabase()).runAsync('DELETE FROM salary_allocations WHERE id = ? AND period_id = ?', [id, periodId]);
+};
+
 export const exportData = async () => {
   const database = await getDatabase();
   const payments = await database.getAllAsync<Payment>('SELECT * FROM payments');
@@ -564,13 +680,14 @@ export const exportData = async () => {
   const uploadedIcons = await database.getAllAsync<UploadedIcon>('SELECT * FROM uploaded_icons');
   const subscriptions = await getSubscriptions();
   const subscriptionCategories = await getSubscriptionCategories();
+  const salary = await getSalaryData();
   const settings = await database.getAllAsync<Settings>(
     "SELECT * FROM settings WHERE key NOT IN ('pinCode', 'pinEnabled', 'biometricEnabled', 'notificationPrivacyMigrated', 'automaticBackupEnabled', 'backupDirectoryUri', 'backupDirectoryLabel', 'lastBackupAt', 'lastAutomaticBackupAt')"
   );
 
   return JSON.stringify({
     format: 'nox-finance-backup',
-    version: 7,
+    version: 9,
     exportedAt: new Date().toISOString(),
     payments,
     debts,
@@ -579,12 +696,14 @@ export const exportData = async () => {
     uploadedIcons,
     subscriptions,
     subscriptionCategories,
+    salary,
     settings,
   }, null, 2);
 };
 
 export const importData = async (raw: string): Promise<void> => {
   const parsed = JSON.parse(raw) as Record<string, unknown>;
+  const salary = validateSalaryBackup(parsed.salary);
   const payments = parsed.payments;
   const debts = parsed.debts;
   const debtPayments = parsed.debtPayments;
@@ -618,6 +737,9 @@ export const importData = async (raw: string): Promise<void> => {
   const database = await getDatabase();
   await database.withExclusiveTransactionAsync(async transaction => {
     await transaction.execAsync(`
+      DELETE FROM salary_allocations;
+      DELETE FROM salary_work_entries;
+      DELETE FROM salary_periods;
       DELETE FROM debt_payments;
       DELETE FROM debts;
       DELETE FROM payments;
@@ -683,6 +805,19 @@ export const importData = async (raw: string): Promise<void> => {
       );
     }
 
+    for (const item of salary.periods) {
+      await transaction.runAsync('INSERT INTO salary_periods (id, month, currency, mode, hourly_rate_minor, monthly_salary_minor) VALUES (?, ?, ?, ?, ?, ?)',
+        [item.id, item.month, item.currency, item.mode, item.hourly_rate_minor, item.monthly_salary_minor]);
+    }
+    for (const item of salary.workEntries) {
+      await transaction.runAsync('INSERT INTO salary_work_entries (id, period_id, date, worked_minutes, break_minutes, hourly_rate_minor, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [item.id, item.period_id, item.date, item.worked_minutes, item.break_minutes, item.hourly_rate_minor, item.notes]);
+    }
+    for (const item of salary.allocations) {
+      await transaction.runAsync('INSERT INTO salary_allocations (id, period_id, kind, source_id, occurrence_date, title, amount_minor, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [item.id, item.period_id, item.kind, item.source_id, item.occurrence_date, item.title, item.amount_minor, item.notes]);
+    }
+
     const protectedSettings = new Set([
       'pinCode', 'pinEnabled', 'biometricEnabled', 'notificationPrivacyMigrated',
       'automaticBackupEnabled', 'backupDirectoryUri', 'backupDirectoryLabel', 'lastBackupAt', 'lastAutomaticBackupAt',
@@ -705,6 +840,9 @@ export const deleteAllData = async (): Promise<void> => {
 
   await database.withExclusiveTransactionAsync(async transaction => {
     await transaction.execAsync(`
+      DELETE FROM salary_allocations;
+      DELETE FROM salary_work_entries;
+      DELETE FROM salary_periods;
       DELETE FROM debt_payments;
       DELETE FROM debts;
       DELETE FROM payments;
@@ -714,7 +852,7 @@ export const deleteAllData = async (): Promise<void> => {
       DELETE FROM subscription_categories;
       DELETE FROM settings;
       DELETE FROM sqlite_sequence
-        WHERE name IN ('payments', 'debts', 'debt_payments', 'categories', 'uploaded_icons', 'subscriptions', 'subscription_categories');
+        WHERE name IN ('payments', 'debts', 'debt_payments', 'categories', 'uploaded_icons', 'subscriptions', 'subscription_categories', 'salary_periods', 'salary_work_entries', 'salary_allocations');
     `);
   });
 

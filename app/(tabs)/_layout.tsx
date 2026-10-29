@@ -10,6 +10,7 @@ export default function TabLayout() {
     <Tabs.Screen name="debts" options={{ title: 'Borçlar' }} />
     <Tabs.Screen name="stats" options={{ title: 'İstatistik' }} />
     <Tabs.Screen name="planner" options={{ title: 'Plan' }} />
+    <Tabs.Screen name="salary" options={{ title: 'Maaş' }} />
     <Tabs.Screen name="settings" options={{ title: 'Ayarlar' }} />
   </Tabs></TabBarInsetProvider>;
 }
